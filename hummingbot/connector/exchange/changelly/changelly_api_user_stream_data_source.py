@@ -1,13 +1,10 @@
 import asyncio
-import time
-import logging
 from typing import TYPE_CHECKING, List, Optional
-import json
+
 from hummingbot.connector.exchange.changelly import changelly_constants as CONSTANTS, changelly_web_utils as web_utils
 from hummingbot.connector.exchange.changelly.changelly_auth import ChangellyAuth
 from hummingbot.core.data_type.user_stream_tracker_data_source import UserStreamTrackerDataSource
-from hummingbot.core.utils.async_utils import safe_ensure_future
-from hummingbot.core.web_assistant.connections.data_types import RESTMethod, WSJSONRequest
+from hummingbot.core.web_assistant.connections.data_types import WSJSONRequest
 from hummingbot.core.web_assistant.web_assistants_factory import WebAssistantsFactory
 from hummingbot.core.web_assistant.ws_assistant import WSAssistant
 from hummingbot.logger import HummingbotLogger
@@ -29,15 +26,14 @@ class ChangellyAPIUserStreamDataSource(UserStreamTrackerDataSource):
         trading_pairs: List[str],
         connector: "ChangellyExchange",
         api_factory: WebAssistantsFactory,
-        domain: str = CONSTANTS.DEFAULT_DOMAIN,
     ):
         super().__init__()
         self._auth: ChangellyAuth = auth
         self._current_listen_key = None
-        self._domain = domain
         self._api_factory = api_factory
         self._connector = connector
         self._trading_pairs = trading_pairs or []
+        self._last_recv_time = 0.0
 
     async def _connected_websocket_assistant(self) -> WSAssistant:
         """
@@ -102,7 +98,8 @@ class ChangellyAPIUserStreamDataSource(UserStreamTrackerDataSource):
 
     async def _process_ws_messages(self, ws: WSAssistant, output: asyncio.Queue):
         async for ws_response in ws.iter_messages():
-            data = ws_response.data
+            data = await ws_response.data
+            print("data: ", data)
             #  TODO: Handle subscription
             output.put_nowait(data)
 
@@ -120,3 +117,9 @@ class ChangellyAPIUserStreamDataSource(UserStreamTrackerDataSource):
         if self._ws_assistant is None:
             self._ws_assistant = await self._api_factory.get_ws_assistant()
         return self._ws_assistant
+
+    async def last_recv_time(self) -> float:
+        """
+        Returns the timestamp of the last received message.
+        """
+        return self._last_recv_time

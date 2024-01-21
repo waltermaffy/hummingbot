@@ -2,7 +2,7 @@ import asyncio
 import time
 from collections import defaultdict
 from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional
-import datetime
+
 import hummingbot.connector.exchange.changelly.changelly_constants as CONSTANTS
 from hummingbot.connector.exchange.changelly import changelly_web_utils as web_utils
 from hummingbot.connector.exchange.changelly.changelly_order_book import ChangellyOrderBook
@@ -40,7 +40,9 @@ class ChangellyAPIOrderBookDataSource(OrderBookTrackerDataSource):
     ):
         super().__init__(trading_pairs)
         self._connector = connector
-        self._diff_messages_queue_key = CONSTANTS.DIFF_EVENT_TYPE
+        self.TRADE_KEY = CONSTANTS.TRADE_EVENT_TYPE
+        self.ODERBOOK_KEY = CONSTANTS.ORDERBOOK_EVENT_TYPE
+
         self._domain = domain
         self._time_synchronizer = time_synchronizer
         self._throttler = throttler
@@ -63,7 +65,8 @@ class ChangellyAPIOrderBookDataSource(OrderBookTrackerDataSource):
         :return: the response from the exchange (JSON dictionary)
         """
         params = {"depth": "1000"}
-        path_url = CONSTANTS.REST_URL + CONSTANTS.ORDER_BOOK + "/" + trading_pair
+        path = CONSTANTS.ORDER_BOOK + "/" + trading_pair
+        path_url = web_utils.public_rest_url(path=path)
         data = await self._connector._api_request(path_url=path_url, method=RESTMethod.GET, params=params)
         return data
 
@@ -76,7 +79,7 @@ class ChangellyAPIOrderBookDataSource(OrderBookTrackerDataSource):
             message_queue.put_nowait(order_book_message)
 
     async def listen_for_subscriptions(self):
-        """
+        """ 
         Connects to the trade events and order diffs websocket endpoints and listens to the messages sent by the
         exchange. Each message is stored in its own queue.
         """
@@ -96,11 +99,6 @@ class ChangellyAPIOrderBookDataSource(OrderBookTrackerDataSource):
                         await asyncio.wait_for(self._process_ws_messages(ws=ws), timeout=seconds_until_next_ping)
                     except asyncio.TimeoutError:
                         ping_time = self._time()
-                        # payload = {
-                        #     "ping": int(ping_time * 1e3)
-                        # }
-                        # ping_request = WSJSONRequest(payload=payload)
-                        # await ws.send(request=ping_request)
                         self._last_ws_message_sent_timestamp = ping_time
             except asyncio.CancelledError:
                 raise
@@ -154,23 +152,10 @@ class ChangellyAPIOrderBookDataSource(OrderBookTrackerDataSource):
         """
         async for ws_response in ws.iter_messages():
             data = ws_response.data
-            if not "id" in data:
-                # NOTIFICATION
-                channel = data.get("ch")
-                # if channel == CONSTANTS.TRADES_CHANNEL:
-                #     pass
-                # elif channel == CONSTANTS.ORDER_BOOK_CHANNEL:
-                #     pass
-                # elif channel == CONSTANTS.ORDER_BOOK_CHANNEL:
-                #     pass
-                # else:
-                #     self.logger().warning(f"Unexpected response from exchange: {data}")
-                if CONSTANTS.DIFF_EVENT_TYPE in data:
-                    self._message_queue[CONSTANTS.DIFF_EVENT_TYPE].put_nowait(data)
-                elif CONSTANTS.SNAPSHOT_EVENT_TYPE in data:
-                    self._message_queue[CONSTANTS.SNAPSHOT_EVENT_TYPE].put_nowait(data)
+            self.logger().info(f"Data received: {data}")
 
             if "result" in data:
+                # SUBSCRIPTION RESPONSE
                 if data["id"] == self.TRADE_STREAM_ID:
                     self.logger().info("Successfully subscribed to trade events.")
                 elif data["id"] == self.DIFF_STREAM_ID:
@@ -180,40 +165,61 @@ class ChangellyAPIOrderBookDataSource(OrderBookTrackerDataSource):
             elif "error" in data:
                 self.logger().error(f"Error response from exchange: {data}")
 
-    # async def _process_ob_snapshot(self, snapshot_queue: asyncio.Queue):
-    #     message_queue = self._message_queue[CONSTANTS.SNAPSHOT_EVENT_TYPE]
-    #     while True:
-    #         try:
-    #             json_msg = await message_queue.get()
-    #             trading_pair = await self._connector.trading_pair_associated_to_exchange_symbol(
-    #                 symbol=json_msg["symbol"])
-    #             order_book_message: OrderBookMessage = ChangellyOrderBook.snapshot_message_from_exchange_websocket(
-    #                 json_msg["data"][0], json_msg["data"][0], {"trading_pair": trading_pair})
-    #             snapshot_queue.put_nowait(order_book_message)
-    #         except asyncio.CancelledError:
-    #             raise
-    #         except Exception:
-    #             self.logger().error("Unexpected error when processing public order book updates from exchange")
-    #             raise
+            if "id" not in data:
+                # NOTIFICATION
+                self.logger().info(f"Notification received: {data}")
+                channel = data.get("ch")
+                if channel == CONSTANTS.TRADES_CHANNEL:
+                    self._message_queue[self.TRADE_KEY].put_nowait(data)
+                elif channel == CONSTANTS.ORDER_BOOK_CHANNEL:
+                    self._message_queue[self.ODERBOOK_KEY].put_nowait(data)
+                
+                if CONSTANTS.SNAPSHOT_EVENT_TYPE in data:
+                    self._message_queue[CONSTANTS.SNAPSHOT_EVENT_TYPE].put_nowait(data)
 
-    # async def _take_full_order_book_snapshot(self, trading_pairs: List[str], snapshot_queue: asyncio.Queue):
-    #     for trading_pair in trading_pairs:
-    #         try:
-    #             snapshot: Dict[str, Any] = await self._request_order_book_snapshot(trading_pair=trading_pair)
-    #             snapshot_timestamp: float = float(datetime.datetime.strptime(snapshot["timestamp"], "%Y-%m-%dT%H:%M:%S.%fZ").timestamp())
-    #             snapshot_msg: OrderBookMessage = ChangellyOrderBook.snapshot_message_from_exchange_rest(
-    #                 snapshot,
-    #                 snapshot_timestamp,
-    #                 metadata={"trading_pair": trading_pair}
-    #             )
-    #             snapshot_queue.put_nowait(snapshot_msg)
-    #             self.logger().debug(f"Saved order book snapshot for {trading_pair}")
-    #         except asyncio.CancelledError:
-    #             raise
-    #         except Exception:
-    #             self.logger().error(f"Unexpected error fetching order book snapshot for {trading_pair}.",
-    #                                 exc_info=True)
-    #             await self._sleep(5.0)
+
+    async def listen_for_trades(self, ev_loop: asyncio.BaseEventLoop, output: asyncio.Queue):
+        while True:
+            try:
+                msg = await self._message_queue[self.TRADE_KEY].get()
+                if "update" in msg:
+                    trade_msg: OrderBookMessage = ChangellyOrderBook.trade_message_from_exchange(msg)
+                    output.put_nowait(trade_msg)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                self.logger().error(f"Error in listen_for_trades: {str(e)}", exc_info=True)
+                await asyncio.sleep(5)
+
+    async def listen_for_order_book_diffs(self, ev_loop: asyncio.BaseEventLoop, output: asyncio.Queue):
+        while True:
+            try:
+                msg = await self._message_queue[self.ODERBOOK_KEY].get()
+                if "update" in msg:
+                    diff_msg: OrderBookMessage = ChangellyOrderBook.diff_message_from_exchange(msg)
+                    output.put_nowait(diff_msg)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                self.logger().error(f"Error in listen_for_order_book_diffs: {str(e)}", exc_info=True)
+                await asyncio.sleep(5)
+
+    async def listen_for_order_book_snapshots(self, ev_loop: asyncio.BaseEventLoop, output: asyncio.Queue):
+        while True:
+            try:
+                for trading_pair in self._trading_pairs:
+                    snapshot: Dict[str, Any] = await self._request_order_book_snapshot(trading_pair)
+                    snapshot_timestamp = time.time()
+                    snapshot_msg: OrderBookMessage = ChangellyOrderBook.snapshot_message_from_exchange(
+                        snapshot, snapshot_timestamp, metadata={"trading_pair": trading_pair}
+                    )
+                    output.put_nowait(snapshot_msg)
+                await asyncio.sleep(60)  # Wait for 60 seconds before the next snapshot
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                self.logger().error(f"Error in listen_for_order_book_snapshots: {str(e)}", exc_info=True)
+                await asyncio.sleep(5)
 
     def _time(self):
         return time.time()

@@ -9,13 +9,13 @@ from hummingbot.core.web_assistant.connections.data_types import RESTMethod
 from hummingbot.core.web_assistant.web_assistants_factory import WebAssistantsFactory
 
 
-def rest_url(path_url: str) -> str:
+def public_rest_url(path: str, domain: Optional[str] = None) -> str:
     """
     Creates a full URL for provided public REST endpoint
-    :param path_url: a public REST endpoint
+    :param path: a public REST endpoint
     :return: the full URL to the endpoint
     """
-    return CONSTANTS.REST_URL + path_url
+    return CONSTANTS.REST_URL + path
 
 
 def build_api_factory(

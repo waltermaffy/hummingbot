@@ -1,16 +1,18 @@
 import json
 import time
 from decimal import Decimal
-from typing import TYPE_CHECKING, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 from hummingbot.connector.exchange.changelly import (  # changelly_utils,
     changelly_constants as CONSTANTS,
+    changelly_utils,
     changelly_web_utils as web_utils,
 )
 from hummingbot.connector.exchange.changelly.changelly_api_order_book_data_source import ChangellyAPIOrderBookDataSource
 from hummingbot.connector.exchange.changelly.changelly_api_user_stream_data_source import (
     ChangellyAPIUserStreamDataSource,
 )
+from bidict import bidict
 from hummingbot.connector.exchange.changelly.changelly_auth import ChangellyAuth
 from hummingbot.connector.exchange_py_base import ExchangePyBase
 from hummingbot.connector.trading_rule import TradingRule
@@ -28,6 +30,9 @@ from hummingbot.core.web_assistant.web_assistants_factory import WebAssistantsFa
 
 if TYPE_CHECKING:
     from hummingbot.client.config.config_helpers import ClientConfigAdapter
+
+s_decimal_NaN = Decimal("nan")
+s_decimal_0 = Decimal(0)
 
 
 class ChangellyExchange(ExchangePyBase):
@@ -92,6 +97,27 @@ class ChangellyExchange(ExchangePyBase):
     @property
     def is_trading_required(self) -> bool:
         return self._trading_required
+    
+    @property
+    def client_order_id_max_length(self):
+        return CONSTANTS.MAX_ORDER_ID_LEN
+    
+    @property
+    def check_network_request_path(self):
+        return None
+    
+    @property
+    def trading_rules_request_path(self):
+        return CONSTANTS.EXCHANGE_INFO_PATH_URL
+    
+    @property
+    def trading_pairs_request_path(self):
+        return CONSTANTS.EXCHANGE_INFO_PATH_URL
+
+    @property
+    def client_order_id_prefix(self):
+        return CONSTANTS.HBOT_ORDER_ID
+    
 
     def supported_order_types(self):
         return [OrderType.LIMIT, OrderType.LIMIT_MAKER, OrderType.MARKET]
@@ -165,6 +191,29 @@ class ChangellyExchange(ExchangePyBase):
         fees_request_payload = {"method": CONSTANTS.SPOT_FEES, "params": {}, "id": self.ORDERS_STREAM_ID}
         await self._ws_assistant.send(WSJSONRequest(payload=fees_request_payload))
 
+    def _get_fee(
+        self,
+        base_currency: str,
+        quote_currency: str,
+        order_type: OrderType,
+        order_side: TradeType,
+        amount: Decimal,
+        price: Decimal = s_decimal_NaN,
+        is_maker: Optional[bool] = None,
+    ) -> TradeFeeBase:
+        is_maker = order_type is OrderType.LIMIT_MAKER
+        trade_base_fee = build_trade_fee(
+            exchange=self.name,
+            is_maker=is_maker,
+            order_side=order_side,
+            order_type=order_type,
+            amount=amount,
+            price=price,
+            base_currency=base_currency,
+            quote_currency=quote_currency,
+        )
+        return trade_base_fee
+
     async def _subscribe_to_balance_updates(self):
         balance_subscription_payload = {
             "method": CONSTANTS.SPOT_BALANCE_SUBSCRIBE,
@@ -173,8 +222,70 @@ class ChangellyExchange(ExchangePyBase):
         }
         await self._ws_assistant.send(WSJSONRequest(payload=balance_subscription_payload))
 
-    # Override the _place_cancel method
     async def _place_cancel(self, order_id: str, tracked_order: InFlightOrder) -> bool:
+        #TODO: Implement - Process the response and return the success status
         # Send the cancel request via WebSocket
         await self._cancel_order_via_websocket(order_id)
-        #TODO: Process the response and return the success status
+
+    async def _all_trade_updates_for_order(self, order: InFlightOrder) -> List[TradeUpdate]:
+        pass #TODO Implement this
+
+    def _create_web_assistants_factory(self) -> WebAssistantsFactory:
+        return web_utils.build_api_factory(
+            throttler=self._throttler, time_synchronizer=self._time_synchronizer, auth=self._auth
+    )
+
+    def _create_order_book_data_source(self) -> OrderBookTrackerDataSource:
+        return ChangellyAPIOrderBookDataSource(
+            trading_pairs=self._trading_pairs,
+            connector=self,
+            api_factory=self._web_assistants_factory
+        )
+    
+    def _create_user_stream_data_source(self) -> UserStreamTrackerDataSource:
+        return ChangellyAPIUserStreamDataSource(
+            auth=self._auth,
+            trading_pairs=self._trading_pairs,
+            connector=self,
+            api_factory=self._web_assistants_factory
+        )
+    
+    async def _format_trading_rules(self, exchange_info_dict: Dict[str, Any]) -> List[TradingRule]:
+        # TODO: Implement this
+        pass
+
+    def _initialize_trading_pair_symbols_from_exchange_info(self, exchange_info: Dict[str, Any]):
+        # TODO: Implement this
+        pass
+
+    def _is_order_not_found_during_status_update_error(self, status_update_exception: Exception) -> bool:
+        # TODO: implement this method correctly for the connector
+        return False
+
+    def _is_order_not_found_during_cancelation_error(self, cancelation_exception: Exception) -> bool:
+        # TODO: implement this method correctly for the connector
+        return False
+
+    def _is_request_exception_related_to_time_synchronizer(self, request_exception: Exception):
+        # TODO: check error code and message of changelly
+        error_description = str(request_exception)
+        is_time_synchronizer_related = "-1021" in error_description and "Timestamp for the request" in error_description
+        return is_time_synchronizer_related
+
+    async def _request_order_status(self, tracked_order: InFlightOrder) -> OrderUpdate:
+        # TODO: Implement this
+        pass 
+
+    async def _update_balances(self):
+        # TODO: Implement this
+        pass
+
+    async def _update_trading_fees(self):
+        """
+        Update fees information from the exchange
+        """
+        pass
+
+    async def _user_stream_event_listener(self):
+        # TODO: Implement this
+        pass

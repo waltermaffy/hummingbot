@@ -1,9 +1,12 @@
-from hummingbot.core.api_throttler.data_types import LinkedLimitWeightPair, RateLimit
+from hummingbot.core.api_throttler.data_types import RateLimit
 from hummingbot.core.data_type.in_flight_order import OrderState
 
 # Based on https://api.pro.changelly.com/#socket-api-reference
-
+EXCHANGE_NAME = "changelly"
 MAX_CONNECTIONS = 100
+MAX_ORDER_ID_LEN = 32
+HBOT_BROKER_ID = "hummingbot"
+HBOT_ORDER_ID = "t-HBOT"
 DEFAULT_DOMAIN = "com"
 
 WS_HEARTBEAT_TIME_INTERVAL = 30
@@ -18,10 +21,15 @@ PUBLIC_API_VERSION = "v3"
 
 # REST API ENDPOINTS
 ORDER_BOOK = "/orderbook"
+EXCHANGE_INFO_PATH_URL = "/exchangeInfo" # TODO: change this
+
 
 # SOCKET EVENTS
 SNAPSHOT_EVENT_TYPE = "snapshot"
 DIFF_EVENT_TYPE = "update"
+
+TRADE_EVENT_TYPE = "trade"
+ORDERBOOK_EVENT_TYPE = "orderbook"
 
 
 # CHANNELS

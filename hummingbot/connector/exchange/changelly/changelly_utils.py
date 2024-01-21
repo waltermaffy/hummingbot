@@ -16,6 +16,7 @@ DEFAULT_FEES = TradeFeeSchema(
 )
 
 
+
 def is_exchange_information_valid(exchange_info: Dict[str, Any]) -> bool:
     """
     Verifies if a trading pair is enabled to operate with based on its exchange information
@@ -56,3 +57,4 @@ OTHER_DOMAINS = ["changelly"]
 OTHER_DOMAINS_PARAMETER = {"changelly": "us"}
 OTHER_DOMAINS_EXAMPLE_PAIR = {"changelly": "BTC-USDT"}
 OTHER_DOMAINS_DEFAULT_FEES = {"changelly": DEFAULT_FEES}
+OTHER_DOMAINS_KEYS = {"changelly": ChangellyConfigMap.construct()}

@@ -2,13 +2,12 @@ import hashlib
 import hmac
 import json
 from base64 import b64encode
-from collections import OrderedDict
-from typing import Any, Dict, List
-from urllib.parse import urlencode, urlsplit
+from typing import Dict, List, Any
+from urllib.parse import urlsplit
 
 from hummingbot.connector.time_synchronizer import TimeSynchronizer
 from hummingbot.core.web_assistant.auth import AuthBase
-from hummingbot.core.web_assistant.connections.data_types import RESTMethod, RESTRequest, WSRequest
+from hummingbot.core.web_assistant.connections.data_types import RESTRequest
 
 
 class ChangellyAuth(AuthBase):
@@ -30,23 +29,21 @@ class ChangellyAuth(AuthBase):
         request.headers = headers
         return request
 
-    async def ws_authenticate(self) -> str:
+    async def ws_authenticate(self) -> Dict[str, Any]:
         """
-        This method return the event that needs to be sent to the exchange to authenticate the user.
+        Generate the authentication message for the websocket connection.
         """
         timestamp = str(int(self.time_provider.time() * 1e3))
 
         sign = hmac.new(self.secret_key.encode("utf8"), timestamp.encode("utf8"), hashlib.sha256).hexdigest()
 
-        return json.dumps(
-            {
-                "method": "login",
-                "params": {"type": "HS256", "api_key": self.api_key, "timestamp": timestamp, "signature": sign},
-            }
-        )
+        return {
+            "method": "login",
+            "params": {"type": "HS256", "api_key": self.api_key, "timestamp": timestamp, "signature": sign},
+        }
 
     def header_for_authentication(self, request: RESTRequest) -> Dict[str, str]:
-        # add HS256 authentication as here https://api.pro.changelly.com/#hs256
+        # HS256 authentication as here https://api.pro.changelly.com/#hs256
         url = urlsplit(request.url)
         message = [request.method, url.path]
         if url.query:
@@ -55,6 +52,7 @@ class ChangellyAuth(AuthBase):
         if request.data:
             message.append(request.data)
 
+        print("message: ", message)
         timestamp = str(int(self.time_provider.time() * 1e3))
         message.append(timestamp)
 
