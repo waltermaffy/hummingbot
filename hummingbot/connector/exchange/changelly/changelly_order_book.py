@@ -1,4 +1,4 @@
-from typing import Dict, Optional, Any
+from typing import Any, Dict, Optional
 
 from hummingbot.core.data_type.common import TradeType
 from hummingbot.core.data_type.order_book import OrderBook
@@ -22,11 +22,16 @@ class ChangellyOrderBook(OrderBook):
 
         snapshot = msg.get("snapshot", {})
         symbol = list(snapshot.keys())[0]
-        data = snapshot[symbol][0]
+        data = snapshot[symbol]
 
         return OrderBookMessage(
             OrderBookMessageType.SNAPSHOT,
-            {"trading_pair": symbol, "update_id": data["t"], "bids": data["b"], "asks": data["a"]},
+            {
+                "trading_pair": msg.get("trading_pair") or symbol,
+                "update_id": data["t"], 
+                "bids": data["b"], 
+                "asks": data["a"]
+            },
             timestamp=timestamp,
         )
 
@@ -76,8 +81,13 @@ class ChangellyOrderBook(OrderBook):
 
         return OrderBookMessage(
             OrderBookMessageType.DIFF,
-            {"trading_pair": symbol, "update_id": data["t"], "bids": data["b"], "asks": data["a"]},
-            timestamp=data["t"],
+            {
+                "trading_pair": msg.get("trading_pair") or symbol,
+                "update_id": data["t"],
+                "bids": data["b"],
+                "asks": data["a"],
+            },
+            timestamp=timestamp,
         )
 
     @classmethod
@@ -101,7 +111,7 @@ class ChangellyOrderBook(OrderBook):
         return OrderBookMessage(
             OrderBookMessageType.TRADE,
             {
-                "trading_pair": symbol,
+                "trading_pair": msg.get("trading_pair") or symbol,
                 "trade_type": trade_type,
                 "trade_id": trade_data["i"],
                 "update_id": ts,

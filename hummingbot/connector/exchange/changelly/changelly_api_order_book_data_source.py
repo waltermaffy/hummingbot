@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 class ChangellyAPIOrderBookDataSource(OrderBookTrackerDataSource):
     HEARTBEAT_TIME_INTERVAL = 30.0
     TRADE_STREAM_ID = 1
-    DIFF_STREAM_ID = 2
+    ORDERBOOK_STREAM_ID = 2
     ONE_HOUR = 60 * 60
 
     _logger: Optional[HummingbotLogger] = None
@@ -53,10 +53,12 @@ class ChangellyAPIOrderBookDataSource(OrderBookTrackerDataSource):
         self._message_queue: Dict[str, asyncio.Queue] = defaultdict(asyncio.Queue)
         self._last_ws_message_sent_timestamp = 0
 
-    async def get_last_traded_prices(self, trading_pairs: List[str], domain: Optional[str] = None) -> Dict[str, float]:
+    async def get_last_traded_prices(self, 
+                                     trading_pairs: List[str], 
+                                     domain: Optional[str] = None) -> Dict[str, float]:
         return await self._connector.get_last_traded_prices(trading_pairs=trading_pairs)
 
-    async def _request_order_book_snapshot(self, trading_pair: str) -> Dict[str, Any]:
+    async def _request_order_book_snapshot(self, trading_pair: str) -> Dict[str, Any] :
         """
         Retrieves a copy of the full order book from the exchange, for a particular trading pair.
 
@@ -65,21 +67,38 @@ class ChangellyAPIOrderBookDataSource(OrderBookTrackerDataSource):
         :return: the response from the exchange (JSON dictionary)
         """
         params = {"depth": "1000"}
-        path = CONSTANTS.ORDER_BOOK + "/" + trading_pair
-        path_url = web_utils.public_rest_url(path=path)
-        data = await self._connector._api_request(path_url=path_url, method=RESTMethod.GET, params=params)
+        symbol = self._connector.exchange_symbol_associated_to_pair(trading_pair=trading_pair)  
+        path = CONSTANTS.ORDER_BOOK_PATH + "/" + symbol
+        rest_assistant = await self._api_factory.get_rest_assistant()
+        data = await rest_assistant.execute_request(
+            url=web_utils.public_rest_url(path),
+            params=params,
+            method=RESTMethod.GET,
+            throttler_limit_id=CONSTANTS.ORDER_BOOK_PATH,
+        )
         return data
 
+    async def _order_book_snapshot(self, trading_pair: str) -> OrderBookMessage:
+        snapshot: Dict[str, Any] = await self._request_order_book_snapshot(trading_pair)
+        snapshot_timestamp: float = time.time()
+        snapshot_msg: OrderBookMessage = ChangellyOrderBook.snapshot_message_from_exchange(
+            snapshot,
+            snapshot_timestamp,
+            metadata={"trading_pair": trading_pair}
+        )
+        return snapshot_msg
+    
     async def _parse_order_book_diff_message(self, raw_message: Dict[str, Any], message_queue: asyncio.Queue):
-        trading_pair = await self._connector.trading_pair_associated_to_exchange_symbol(symbol=raw_message["symbol"])
+        trading_pair = self._connector.trading_pair_associated_to_exchange_symbol(symbol=raw_message["symbol"])
         for diff_message in raw_message["data"]:
             order_book_message: OrderBookMessage = ChangellyOrderBook.diff_message_from_exchange(
                 diff_message, diff_message["t"], {"trading_pair": trading_pair}
             )
             message_queue.put_nowait(order_book_message)
 
+
     async def listen_for_subscriptions(self):
-        """ 
+        """
         Connects to the trade events and order diffs websocket endpoints and listens to the messages sent by the
         exchange. Each message is stored in its own queue.
         """
@@ -130,7 +149,7 @@ class ChangellyAPIOrderBookDataSource(OrderBookTrackerDataSource):
                     "method": "subscribe",
                     "ch": CONSTANTS.ORDER_BOOK_CHANNEL,
                     "params": {"symbols": [symbol]},
-                    "id": self.DIFF_STREAM_ID,
+                    "id": self.ORDERBOOK_STREAM_ID,
                 }
                 subscribe_orderbook_request: WSJSONRequest = WSJSONRequest(payload=depth_payload)
 
@@ -145,6 +164,12 @@ class ChangellyAPIOrderBookDataSource(OrderBookTrackerDataSource):
                 "Unexpected error occurred subscribing to order book trading and delta streams...", exc_info=True
             )
             raise
+    
+    async def _connected_websocket_assistant(self) -> WSAssistant:
+        ws: WSAssistant = await self._api_factory.get_ws_assistant()
+        await ws.connect(ws_url=CONSTANTS.WSS_MARKET_URL.format(self._domain),
+                            ping_timeout=CONSTANTS.WS_HEARTBEAT_TIME_INTERVAL)
+        return ws
 
     async def _process_ws_messages(self, ws: WSAssistant):
         """
@@ -158,7 +183,7 @@ class ChangellyAPIOrderBookDataSource(OrderBookTrackerDataSource):
                 # SUBSCRIPTION RESPONSE
                 if data["id"] == self.TRADE_STREAM_ID:
                     self.logger().info("Successfully subscribed to trade events.")
-                elif data["id"] == self.DIFF_STREAM_ID:
+                elif data["id"] == self.ORDERBOOK_STREAM_ID:
                     self.logger().info("Successfully subscribed to order book events.")
                 else:
                     self.logger().warning(f"Unexpected response from exchange: {data}")
@@ -173,12 +198,11 @@ class ChangellyAPIOrderBookDataSource(OrderBookTrackerDataSource):
                     self._message_queue[self.TRADE_KEY].put_nowait(data)
                 elif channel == CONSTANTS.ORDER_BOOK_CHANNEL:
                     self._message_queue[self.ODERBOOK_KEY].put_nowait(data)
-                
+
                 if CONSTANTS.SNAPSHOT_EVENT_TYPE in data:
                     self._message_queue[CONSTANTS.SNAPSHOT_EVENT_TYPE].put_nowait(data)
 
-
-    async def listen_for_trades(self, ev_loop: asyncio.BaseEventLoop, output: asyncio.Queue):
+    async def listen_for_trades(self, ev_loop: asyncio.AbstractEventLoop, output: asyncio.Queue):
         while True:
             try:
                 msg = await self._message_queue[self.TRADE_KEY].get()
@@ -191,11 +215,12 @@ class ChangellyAPIOrderBookDataSource(OrderBookTrackerDataSource):
                 self.logger().error(f"Error in listen_for_trades: {str(e)}", exc_info=True)
                 await asyncio.sleep(5)
 
-    async def listen_for_order_book_diffs(self, ev_loop: asyncio.BaseEventLoop, output: asyncio.Queue):
+    async def listen_for_order_book_diffs(self, ev_loop: asyncio.AbstractEventLoop, output: asyncio.Queue):
         while True:
             try:
                 msg = await self._message_queue[self.ODERBOOK_KEY].get()
-                if "update" in msg:
+                channel = msg.get("ch")
+                if "update" in msg and channel == CONSTANTS.ORDER_BOOK_CHANNEL:
                     diff_msg: OrderBookMessage = ChangellyOrderBook.diff_message_from_exchange(msg)
                     output.put_nowait(diff_msg)
             except asyncio.CancelledError:
@@ -204,7 +229,7 @@ class ChangellyAPIOrderBookDataSource(OrderBookTrackerDataSource):
                 self.logger().error(f"Error in listen_for_order_book_diffs: {str(e)}", exc_info=True)
                 await asyncio.sleep(5)
 
-    async def listen_for_order_book_snapshots(self, ev_loop: asyncio.BaseEventLoop, output: asyncio.Queue):
+    async def listen_for_order_book_snapshots(self, ev_loop: asyncio.AbstractEventLoop, output: asyncio.Queue):
         while True:
             try:
                 for trading_pair in self._trading_pairs:

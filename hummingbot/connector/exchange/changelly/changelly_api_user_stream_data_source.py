@@ -97,13 +97,13 @@ class ChangellyAPIUserStreamDataSource(UserStreamTrackerDataSource):
         """
         async for ws_response in ws.iter_messages():
             data = ws_response.data
-            if 'method' in data:
-                method = data['method']
-                params = data['params']
-                if method == 'spot_order' or method == 'spot_orders':
+            if "method" in data:
+                method = data["method"]
+                params = data["params"]
+                if method == "spot_order" or method == "spot_orders":
                     # Handle spot order updates or snapshots
                     self._handle_spot_order(params, output)
-                elif method == 'spot_balance':
+                elif method == "spot_balance":
                     # Handle spot balance updates
                     self._handle_spot_balance(params, output)
 
@@ -115,12 +115,11 @@ class ChangellyAPIUserStreamDataSource(UserStreamTrackerDataSource):
             internal_order_update = self._convert_to_internal_order_format(order)
             output_queue.put_nowait(internal_order_update)
 
-
     def _convert_to_internal_order_format(self, order):
         """
         Convert a spot order update or snapshot to the internal order format.
         """
-        # TODO: Implement this method 
+        # TODO: Implement this method
         pass
 
     def _handle_spot_balance(self, data, output_queue: asyncio.Queue):

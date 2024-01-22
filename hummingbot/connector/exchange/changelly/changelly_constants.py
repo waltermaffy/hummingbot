@@ -1,4 +1,4 @@
-from hummingbot.core.api_throttler.data_types import RateLimit
+from hummingbot.core.api_throttler.data_types import LinkedLimitWeightPair, RateLimit
 from hummingbot.core.data_type.in_flight_order import OrderState
 
 # Based on https://api.pro.changelly.com/#socket-api-reference
@@ -20,8 +20,8 @@ WSS_WALLET_URL = "wss://api.pro.changelly.com/api/3/ws/wallet"
 PUBLIC_API_VERSION = "v3"
 
 # REST API ENDPOINTS
-ORDER_BOOK = "/orderbook"
-EXCHANGE_INFO_PATH_URL = "/exchangeInfo" # TODO: change this
+ORDER_BOOK_PATH = "orderbook"
+TRADING_PAIRS_PATH_URL = "symbols"
 
 
 # SOCKET EVENTS
@@ -93,8 +93,18 @@ MAX_REQUEST_SPOT_BALANCE = 30
 MAX_REQUEST_ORDERS = 500
 MAX_REQUEST_WALLET = 15
 
+REQUEST_WEIGHT = "REQUEST_WEIGHT"
+RAW_REQUESTS = "RAW_REQUESTS"
+
 
 RATE_LIMITS = [
+    # Weighted Limits
+    RateLimit(limit_id=ORDER_BOOK_PATH, limit=MAX_REQUEST, time_interval=ONE_MINUTE,
+              linked_limits=[LinkedLimitWeightPair(REQUEST_WEIGHT, 20),
+                             LinkedLimitWeightPair(RAW_REQUESTS, 30)]),
+    RateLimit(limit_id=ORDER_BOOK_PATH, limit=MAX_REQUEST, time_interval=ONE_MINUTE,
+              linked_limits=[LinkedLimitWeightPair(REQUEST_WEIGHT, 20),
+                             LinkedLimitWeightPair(RAW_REQUESTS, 30)]),
     # Pools
     RateLimit(limit_id=LOGIN, limit=MAX_REQUEST_LOGIN, time_interval=ONE_SECOND),
     RateLimit(limit_id=SPOT_SUBSCRIBE, limit=MAX_REQUEST_LOGIN, time_interval=ONE_SECOND),
@@ -114,6 +124,8 @@ RATE_LIMITS = [
     RateLimit(limit_id=WALLET_BALANCE, limit=MAX_REQUEST_WALLET, time_interval=ONE_SECOND),
     RateLimit(limit_id=WALLET_BALANCES, limit=MAX_REQUEST_WALLET, time_interval=ONE_SECOND),
     RateLimit(limit_id=TRANSACTIONS, limit=MAX_REQUEST_WALLET, time_interval=ONE_SECOND),
+
+
 ]
 
 ORDER_NOT_EXIST_ERROR_CODE = -2013

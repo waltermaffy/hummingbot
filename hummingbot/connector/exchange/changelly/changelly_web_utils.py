@@ -15,7 +15,7 @@ def public_rest_url(path: str, domain: Optional[str] = None) -> str:
     :param path: a public REST endpoint
     :return: the full URL to the endpoint
     """
-    return CONSTANTS.REST_URL + path
+    return CONSTANTS.REST_URL + "/" + path
 
 
 def build_api_factory(

@@ -1,23 +1,23 @@
 import asyncio
 import hashlib
 import hmac
-from copy import copy
-from unittest import TestCase
-from unittest.mock import MagicMock
-
-from typing_extensions import Awaitable
-from hummingbot.connector.exchange.changelly.changelly_auth import ChangellyAuth
-from hummingbot.core.web_assistant.connections.data_types import RESTMethod, RESTRequest
-from websocket import create_connection
-import websocket
 import json
+from copy import copy
 from hashlib import sha256
 from hmac import HMAC
 from time import time
+from unittest import TestCase
+from unittest.mock import MagicMock
+
+import websocket
+from typing_extensions import Awaitable
+from websocket import create_connection
+
+from hummingbot.connector.exchange.changelly.changelly_auth import ChangellyAuth
+from hummingbot.core.web_assistant.connections.data_types import RESTMethod, RESTRequest
 
 
 class ChangellyAuthAuthTests(TestCase):
-
     def setUp(self) -> None:
         self._api_key = "testApiKey"
         self._secret = "testSecret"
@@ -42,9 +42,8 @@ class ChangellyAuthAuthTests(TestCase):
         self.assertEqual(now * 1e3, float(configured_request["params"]["timestamp"]))
         # check signature
         expected_signature = hmac.new(
-            self._secret.encode("utf-8"),
-            configured_request["params"]["timestamp"].encode("utf-8"),
-            hashlib.sha256).hexdigest()
+            self._secret.encode("utf-8"), configured_request["params"]["timestamp"].encode("utf-8"), hashlib.sha256
+        ).hexdigest()
         self.assertEqual(expected_signature, configured_request["params"]["signature"])
 
     def test_ws_login(self):
