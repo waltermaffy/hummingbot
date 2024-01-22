@@ -75,11 +75,6 @@ class ChangellyAPIUserStreamDataSource(UserStreamTrackerDataSource):
                         )
                     except asyncio.TimeoutError:
                         ping_time = self._time()
-                        # payload = {
-                        #     "ping": int(ping_time * 1e3)
-                        # }
-                        # ping_request = WSJSONRequest(payload=payload)
-                        # await ws.send(request=ping_request)
                         self._last_ws_message_sent_timestamp = ping_time
             except asyncio.CancelledError:
                 raise
@@ -97,11 +92,54 @@ class ChangellyAPIUserStreamDataSource(UserStreamTrackerDataSource):
             await ws.send(payload)
 
     async def _process_ws_messages(self, ws: WSAssistant, output: asyncio.Queue):
+        """
+        Process incoming WebSocket messages and handle different types of notifications.
+        """
         async for ws_response in ws.iter_messages():
-            data = await ws_response.data
-            print("data: ", data)
-            #  TODO: Handle subscription
-            output.put_nowait(data)
+            data = ws_response.data
+            if 'method' in data:
+                method = data['method']
+                params = data['params']
+                if method == 'spot_order' or method == 'spot_orders':
+                    # Handle spot order updates or snapshots
+                    self._handle_spot_order(params, output)
+                elif method == 'spot_balance':
+                    # Handle spot balance updates
+                    self._handle_spot_balance(params, output)
+
+    def _handle_spot_order(self, data, output_queue: asyncio.Queue):
+        """
+        Process spot order updates or snapshots and put them into the output queue.
+        """
+        for order in data:
+            internal_order_update = self._convert_to_internal_order_format(order)
+            output_queue.put_nowait(internal_order_update)
+
+
+    def _convert_to_internal_order_format(self, order):
+        """
+        Convert a spot order update or snapshot to the internal order format.
+        """
+        # TODO: Implement this method 
+        pass
+
+    def _handle_spot_balance(self, data, output_queue: asyncio.Queue):
+        """
+        Process spot balance updates and put them into the output queue.
+        """
+        # TODO: Process the spot balance data and convert it to the appropriate internal format
+        # This is an example and needs to be modified according to your internal data structures.
+        for balance in data:
+            # Example: Convert 'balance' to your internal balance update format and add to output_queue
+            internal_balance_update = self._convert_to_internal_balance_format(balance)
+            output_queue.put_nowait(internal_balance_update)
+
+    def _convert_to_internal_balance_format(self, balance):
+        """
+        Convert a spot balance update to the internal balance format.
+        """
+        # TODO: Implement this method
+        pass
 
     async def _on_user_stream_interruption(self, websocket_assistant: Optional[WSAssistant]):
         """

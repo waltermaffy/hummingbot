@@ -139,11 +139,6 @@ class ChangellyExchange(ExchangePyBase):
                 break
             await self._handle_websocket_message(msg)
 
-    async def _handle_websocket_message(self, msg):
-        #TODO Handle different types of messages like order updates, trade updates etc.
-        raise NotImplementedError
-
-
     async def _place_order(
         self,
         order_id: str,
@@ -281,11 +276,13 @@ class ChangellyExchange(ExchangePyBase):
         pass
 
     async def _update_trading_fees(self):
-        """
-        Update fees information from the exchange
-        """
+        # TODO: Implement this
         pass
 
     async def _user_stream_event_listener(self):
         # TODO: Implement this
         pass
+
+    async def _handle_websocket_message(self, msg):
+        #TODO Handle different types of messages like order updates, trade updates etc.
+        raise NotImplementedError

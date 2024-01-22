@@ -22,7 +22,7 @@ class ChangellyOrderBook(OrderBook):
 
         snapshot = msg.get("snapshot", {})
         symbol = list(snapshot.keys())[0]
-        data = snapshot[symbol]
+        data = snapshot[symbol][0]
 
         return OrderBookMessage(
             OrderBookMessageType.SNAPSHOT,
