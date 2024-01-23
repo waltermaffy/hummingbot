@@ -31,6 +31,8 @@ class TestChangellyAPIOrderBookDataSource(unittest.TestCase):
         cls.quote_asset = "USDT"
         cls.trading_pair = f"{cls.base_asset}-{cls.quote_asset}"
         cls.ex_trading_pair = cls.base_asset + cls.quote_asset
+        cls.domain = "com"
+
 
     def setUp(self) -> None:
         super().setUp()
@@ -53,8 +55,6 @@ class TestChangellyAPIOrderBookDataSource(unittest.TestCase):
             trading_pairs=[self.trading_pair],
             connector=self.connector,
             api_factory=self.connector._web_assistants_factory,
-            throttler=self.throttler,
-            time_synchronizer=self.time_synchronnizer,
         )
 
         self._original_full_order_book_reset_time = self.ob_data_source.FULL_ORDER_BOOK_RESET_DELTA_SECONDS
@@ -66,6 +66,11 @@ class TestChangellyAPIOrderBookDataSource(unittest.TestCase):
         self.resume_test_event = asyncio.Event()
 
         self.connector._set_trading_pair_symbol_map(bidict({self.ex_trading_pair: self.trading_pair}))
+
+    def tearDown(self) -> None:
+        self.listening_task and self.listening_task.cancel()
+        self.ob_data_source.FULL_ORDER_BOOK_RESET_DELTA_SECONDS = self._original_full_order_book_reset_time
+        super().tearDown()
 
     def handle(self, record):
         self.log_records.append(record)
@@ -132,7 +137,7 @@ class TestChangellyAPIOrderBookDataSource(unittest.TestCase):
         mock_api.get(url)
 
         ret = self.async_run_with_timeout(coroutine=self.ob_data_source._request_order_book_snapshot(self.trading_pair))
-        print(ret)
+        print("test_request_order_book_snapshot", ret)
         # todo: assert ret
 
     @aioresponses()
