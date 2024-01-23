@@ -58,7 +58,6 @@ class ChangellyAPIUserStreamDataSource(UserStreamTrackerDataSource):
             raise Exception(f"Authentication failed. Error: {auth_response}")
 
 
-
     async def _subscribe_channels(self, ws: WSAssistant):
         subscribe_payload = {"method": CONSTANTS.SPOT_SUBSCRIBE, "params": {}, "id": self.SPOT_STREAM_ID}
         payload: WSJSONRequest = WSJSONRequest(payload=subscribe_payload)

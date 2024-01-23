@@ -464,21 +464,6 @@ class ChangellyExchange(ExchangePyBase):
 
         return None
 
-    # async def _initialize_trading_pair_symbol_map(self):
-    #     try:
-    #         path_url = web_utils.public_rest_url(CONSTANTS.TRADING_PAIRS_PATH_URL)
-    #         # exchange_info = await self._api_get(path_url=path_url)
-    #         params = {}
-    #         rest_assistant = await self._web_assistants_factory.get_rest_assistant()
-    #         exchange_info = await rest_assistant.execute_request(
-    #             url=path_url,
-    #             method=RESTMethod.GET,
-    #             throttler_limit_id=path_url,
-    #         )
-            
-    #         self._initialize_trading_pair_symbols_from_exchange_info(exchange_info=exchange_info)
-    #     except Exception:
-    #         self.logger().exception("There was an error requesting exchange info.")
 
 
 

@@ -20,17 +20,17 @@ class ChangellyOrderBook(OrderBook):
         if metadata:
             msg.update(metadata)
 
-        snapshot = msg.get("snapshot", {})
-        symbol = list(snapshot.keys())[0]
-        data = snapshot[symbol]
+        # snapshot = msg.get("snapshot", {})
+        # symbol = list(snapshot.keys())[0]
+        # data = snapshot[symbol]
 
         return OrderBookMessage(
             OrderBookMessageType.SNAPSHOT,
             {
-                "trading_pair": msg.get("trading_pair") or symbol,
-                "update_id": data["t"], 
-                "bids": data["b"], 
-                "asks": data["a"]
+                "trading_pair": msg.get("trading_pair"),
+                "update_id": timestamp, 
+                "bids": msg["bid"], 
+                "asks": msg["ask"]
             },
             timestamp=timestamp,
         )

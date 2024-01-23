@@ -40,10 +40,10 @@ class ChangellyAPIOrderBookDataSource(OrderBookTrackerDataSource):
         self._connector = connector
         self._trade_messages_queue_key = CONSTANTS.TRADE_EVENT_TYPE
         self._diff_messages_queue_key = CONSTANTS.DIFF_EVENT_TYPE
+        self._snapshot_messages_queue_key = CONSTANTS.SNAPSHOT_EVENT_TYPE
         self._domain = domain
         self._api_factory = api_factory 
         
-
     async def get_last_traded_prices(self, 
                                      trading_pairs: List[str], 
                                      domain: Optional[str] = None) -> Dict[str, float]:
@@ -56,6 +56,7 @@ class ChangellyAPIOrderBookDataSource(OrderBookTrackerDataSource):
         :param trading_pair: the trading pair for which the order book will be retrieved
 
         :return: the response from the exchange (JSON dictionary)
+    
         """
         params = {"depth": "1000"}
         symbol = await self._connector.exchange_symbol_associated_to_pair(trading_pair=trading_pair)  
@@ -65,7 +66,7 @@ class ChangellyAPIOrderBookDataSource(OrderBookTrackerDataSource):
         data = await rest_assistant.execute_request(
             url=url,
             method=RESTMethod.GET,
-            throttler_limit_id=url,
+            throttler_limit_id=CONSTANTS.ORDER_BOOK_PATH,
         )
         return data
 
@@ -113,6 +114,7 @@ class ChangellyAPIOrderBookDataSource(OrderBookTrackerDataSource):
     async def _order_book_snapshot(self, trading_pair: str) -> OrderBookMessage:
         snapshot: Dict[str, Any] = await self._request_order_book_snapshot(trading_pair)
         snapshot_timestamp: float = time.time()
+        # self.logger().debug(f"Order book snapshot for {trading_pair} at {snapshot_timestamp}: {snapshot}")
         snapshot_msg: OrderBookMessage = ChangellyOrderBook.snapshot_message_from_exchange(
             snapshot,
             snapshot_timestamp,
@@ -155,5 +157,7 @@ class ChangellyAPIOrderBookDataSource(OrderBookTrackerDataSource):
             channel = self._trade_messages_queue_key
         elif ws_channel == CONSTANTS.ORDER_BOOK_CHANNEL:
             channel = self._diff_messages_queue_key
+            if "snapshot" in event_message:
+                channel = self._trade_messages_queue_key
         return channel
 

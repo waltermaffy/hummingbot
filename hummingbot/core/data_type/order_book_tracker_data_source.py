@@ -125,7 +125,7 @@ class OrderBookTrackerDataSource(metaclass=ABCMeta):
                 try:
                     snapshot_event = await asyncio.wait_for(message_queue.get(),
                                                             timeout=self.FULL_ORDER_BOOK_RESET_DELTA_SECONDS)
-                    await self._parse_order_boxok_snapshot_message(raw_message=snapshot_event, message_queue=output)
+                    await self._parse_order_book_snapshot_message(raw_message=snapshot_event, message_queue=output)
                 except asyncio.TimeoutError:
                     await self._request_order_book_snapshots(output=output)
             except asyncio.CancelledError:
