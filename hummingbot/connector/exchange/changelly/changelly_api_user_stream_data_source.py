@@ -52,10 +52,12 @@ class ChangellyAPIUserStreamDataSource(UserStreamTrackerDataSource):
         """
         auth_message: WSJSONRequest = WSJSONRequest(payload=self._auth.ws_authenticate())
         await ws.send(auth_message)
-        # expected successful_auth_response = {   "jsonrpc": "2.0", "result": {"authenticated": True}, "id": 1}
-        auth_response = await ws.receive()
-        print(auth_response)
-        
+        ws_response = await ws.receive()
+        auth_response = ws_response.data
+        if not auth_response.get("result"):
+            raise Exception(f"Authentication failed. Error: {auth_response}")
+
+
 
     async def _subscribe_channels(self, ws: WSAssistant):
         subscribe_payload = {"method": CONSTANTS.SPOT_SUBSCRIBE, "params": {}, "id": self.SPOT_STREAM_ID}

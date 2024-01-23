@@ -100,7 +100,7 @@ RAW_REQUESTS = "RAW_REQUESTS"
 
 RATE_LIMITS = [
     # Weighted Limits
-    RateLimit(limit_id=ORDER_BOOK_PATH, limit=MAX_REQUEST, time_interval=ONE_MINUTE,
+    RateLimit(limit_id=TRADING_PAIRS_PATH_URL, limit=MAX_REQUEST, time_interval=ONE_MINUTE,
               linked_limits=[LinkedLimitWeightPair(REQUEST_WEIGHT, 20),
                              LinkedLimitWeightPair(RAW_REQUESTS, 30)]),
     RateLimit(limit_id=ORDER_BOOK_PATH, limit=MAX_REQUEST, time_interval=ONE_MINUTE,

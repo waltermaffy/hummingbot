@@ -40,8 +40,6 @@ class ChangellyAPIOrderBookDataSource(OrderBookTrackerDataSource):
         self._connector = connector
         self._trade_messages_queue_key = CONSTANTS.TRADE_EVENT_TYPE
         self._diff_messages_queue_key = CONSTANTS.DIFF_EVENT_TYPE
-        # self.__snapshot_messages_queue_key = CONSTANTS.SNAPSHOT_EVENT_TYPE
-        
         self._domain = domain
         self._api_factory = api_factory 
         
@@ -59,15 +57,15 @@ class ChangellyAPIOrderBookDataSource(OrderBookTrackerDataSource):
 
         :return: the response from the exchange (JSON dictionary)
         """
-        # params = {"depth": "1000"}
-        params = {}
+        params = {"depth": "1000"}
         symbol = await self._connector.exchange_symbol_associated_to_pair(trading_pair=trading_pair)  
         path = CONSTANTS.ORDER_BOOK_PATH + "/" + symbol
         rest_assistant = await self._api_factory.get_rest_assistant()
+        url = web_utils.public_rest_url(path)
         data = await rest_assistant.execute_request(
-            url=web_utils.public_rest_url(path),
+            url=url,
             method=RESTMethod.GET,
-            throttler_limit_id=CONSTANTS.ORDER_BOOK_PATH,
+            throttler_limit_id=url,
         )
         return data
 
@@ -122,22 +120,21 @@ class ChangellyAPIOrderBookDataSource(OrderBookTrackerDataSource):
         )
         return snapshot_msg
     
-    async def _parse_trade_message(self, raw_message: Tuple[Dict[str, Any], Any], message_queue: asyncio.Queue):
-        message: Dict[str, Any] = raw_message[0]
-        channel = message.get("ch")
+    async def _parse_trade_message(self, raw_message: Dict[str, Any], message_queue: asyncio.Queue):
+        channel = raw_message.get("ch")
         if channel == CONSTANTS.TRADES_CHANNEL:
             data = {}
-            if "update" in message:
-                data = message.get("update", {})
-            elif "snapshot" in message:
-                data = message.get("snapshot", {})
+            if "update" in raw_message:
+                data = raw_message.get("update", {})
+            elif "snapshot" in raw_message:
+                data = raw_message.get("snapshot", {})
             else:
-                self.logger().warning(f"Unexpected response from exchange: {message}")
+                self.logger().warning(f"Unexpected response from exchange: {raw_message}")
 
             symbol = list(data.keys())[0]
             trading_pair = await self._connector.trading_pair_associated_to_exchange_symbol(symbol=symbol)
             trade_message = ChangellyOrderBook.trade_message_from_exchange(
-                message, {"trading_pair": trading_pair})
+                raw_message, {"trading_pair": trading_pair})
             message_queue.put_nowait(trade_message)
 
     async def _parse_order_book_diff_message(self, raw_message: Dict[str, Any], message_queue: asyncio.Queue):     

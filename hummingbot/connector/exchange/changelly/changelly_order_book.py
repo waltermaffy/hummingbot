@@ -76,7 +76,8 @@ class ChangellyOrderBook(OrderBook):
 
         data = cls._get_data_from_message(msg)
         symbol = list(data.keys())[0]
-        data = data[symbol][0]
+        data = data[symbol]
+        
         ts = data["t"] if not timestamp else timestamp
         return OrderBookMessage(
             OrderBookMessageType.DIFF,
