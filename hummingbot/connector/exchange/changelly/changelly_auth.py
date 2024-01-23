@@ -9,7 +9,6 @@ from hummingbot.connector.time_synchronizer import TimeSynchronizer
 from hummingbot.core.web_assistant.auth import AuthBase
 from hummingbot.core.web_assistant.connections.data_types import RESTRequest
 
-
 class ChangellyAuth(AuthBase):
     def __init__(self, api_key: str, secret_key: str, time_provider: Optional[TimeSynchronizer] = None ):
         self.api_key = api_key
@@ -33,13 +32,16 @@ class ChangellyAuth(AuthBase):
         """
         Generate the authentication message for the websocket connection.
         """
-        timestamp = str(int(self.time_provider.time() * 1e3))
-
-        sign = hmac.new(self.secret_key.encode("utf8"), timestamp.encode("utf8"), hashlib.sha256).hexdigest()
-
+        timestamp = int(self.time_provider.time() * 1e3)
+        window = 10000
+        message = str(timestamp)
+        if window:
+            message += str(window)
+        sign = hmac.new(self.secret_key.encode(), message.encode(), hashlib.sha256).hexdigest()
+        
         return {
             "method": "login",
-            "params": {"type": "HS256", "api_key": self.api_key, "timestamp": timestamp, "signature": sign},
+            "params": {"type": "HS256", "api_key": self.api_key, "timestamp": timestamp, "window": window, "signature": sign},
         }
 
     def header_for_authentication(self, request: RESTRequest) -> Dict[str, str]:
