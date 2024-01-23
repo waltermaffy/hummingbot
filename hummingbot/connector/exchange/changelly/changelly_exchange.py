@@ -1,8 +1,8 @@
+import asyncio
 import json
 import time
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
-import asyncio
 
 from bidict import bidict
 

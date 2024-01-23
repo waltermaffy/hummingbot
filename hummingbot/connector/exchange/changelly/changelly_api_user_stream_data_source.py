@@ -4,12 +4,11 @@ from typing import TYPE_CHECKING, List, Optional
 from hummingbot.connector.exchange.changelly import changelly_constants as CONSTANTS, changelly_web_utils as web_utils
 from hummingbot.connector.exchange.changelly.changelly_auth import ChangellyAuth
 from hummingbot.core.data_type.user_stream_tracker_data_source import UserStreamTrackerDataSource
+from hummingbot.core.utils.async_utils import safe_ensure_future
 from hummingbot.core.web_assistant.connections.data_types import WSJSONRequest
 from hummingbot.core.web_assistant.web_assistants_factory import WebAssistantsFactory
 from hummingbot.core.web_assistant.ws_assistant import WSAssistant
 from hummingbot.logger import HummingbotLogger
-from hummingbot.core.utils.async_utils import safe_ensure_future
-
 
 if TYPE_CHECKING:
     from hummingbot.connector.exchange.changelly.changelly_exchange import ChangellyExchange
@@ -53,13 +52,19 @@ class ChangellyAPIUserStreamDataSource(UserStreamTrackerDataSource):
         """
         auth_message: WSJSONRequest = WSJSONRequest(payload=self._auth.ws_authenticate())
         await ws.send(auth_message)
+        # expected successful_auth_response = {   "jsonrpc": "2.0", "result": {"authenticated": True}, "id": 1}
+        auth_response = await ws.receive()
+        print(auth_response)
+        
 
-    
     async def _subscribe_channels(self, ws: WSAssistant):
         subscribe_payload = {"method": CONSTANTS.SPOT_SUBSCRIBE, "params": {}, "id": self.SPOT_STREAM_ID}
         payload: WSJSONRequest = WSJSONRequest(payload=subscribe_payload)
         await ws.send(payload)
-
+        
+        # check result message
+        result_message = await ws.receive()
+        print(result_message)
     
     async def _on_user_stream_interruption(self, websocket_assistant: Optional[WSAssistant]):
         """

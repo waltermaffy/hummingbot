@@ -21,7 +21,7 @@ PUBLIC_API_VERSION = "v3"
 
 # REST API ENDPOINTS
 ORDER_BOOK_PATH = "orderbook"
-TRADING_PAIRS_PATH_URL = "symbols"
+TRADING_PAIRS_PATH_URL = "symbol"
 
 
 # SOCKET EVENTS
@@ -45,6 +45,7 @@ SPOT_BALANCE_UNSUBSCRIBE = "spot_balance_unsubscribe"
 SPOT_BALANCES = "spot_balances"
 SPOT_FEE = "spot_fee"
 SPOT_FEES = "spot_fees"
+SPOT_GET_ORDERS = "spot_get_orders"
 SPOT_NEW_ORDER = "spot_new_order"
 SPOT_NEW_ORDER_LIST = "spot_new_order_list"
 SPOT_REPLACE_ORDER = "spot_replace_order"

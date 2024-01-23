@@ -2,16 +2,16 @@ import hashlib
 import hmac
 import json
 from base64 import b64encode
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 from urllib.parse import urlsplit
-
+import time
 from hummingbot.connector.time_synchronizer import TimeSynchronizer
 from hummingbot.core.web_assistant.auth import AuthBase
 from hummingbot.core.web_assistant.connections.data_types import RESTRequest
 
 
 class ChangellyAuth(AuthBase):
-    def __init__(self, api_key: str, secret_key: str, time_provider: TimeSynchronizer):
+    def __init__(self, api_key: str, secret_key: str, time_provider: Optional[TimeSynchronizer] = None ):
         self.api_key = api_key
         self.secret_key = secret_key
         self.time_provider = time_provider
@@ -29,7 +29,7 @@ class ChangellyAuth(AuthBase):
         request.headers = headers
         return request
 
-    async def ws_authenticate(self) -> Dict[str, Any]:
+    def ws_authenticate(self) -> Dict[str, Any]:
         """
         Generate the authentication message for the websocket connection.
         """
