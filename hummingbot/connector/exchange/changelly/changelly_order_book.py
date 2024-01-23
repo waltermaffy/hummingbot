@@ -74,20 +74,19 @@ class ChangellyOrderBook(OrderBook):
         if metadata:
             msg.update(metadata)
 
-        # Assuming 'update' key contains the diff data
-        update = msg.get("update", {})
-        symbol = list(update.keys())[0]
-        data = update[symbol][0]
-
+        data = cls._get_data_from_message(msg)
+        symbol = list(data.keys())[0]
+        data = data[symbol][0]
+        ts = data["t"] if not timestamp else timestamp
         return OrderBookMessage(
             OrderBookMessageType.DIFF,
             {
-                "trading_pair": msg.get("trading_pair") or symbol,
-                "update_id": data["t"],
+                "trading_pair": msg.get("trading_pair"),
+                "update_id": ts,
                 "bids": data["b"],
                 "asks": data["a"],
             },
-            timestamp=timestamp,
+            timestamp=ts,
         )
 
     @classmethod
@@ -102,16 +101,17 @@ class ChangellyOrderBook(OrderBook):
             msg.update(metadata)
 
         # Extracting trade data from the message
-        update = msg.get("update", {})
-        symbol = list(update.keys())[0]
-        trade_data = update[symbol][0]
+        data = cls._get_data_from_message(msg)
+
+        symbol = list(data.keys())[0]
+        trade_data = data[symbol][0]
         ts = trade_data["t"]
         trade_type = TradeType.BUY if trade_data["s"] == "buy" else TradeType.SELL
 
         return OrderBookMessage(
             OrderBookMessageType.TRADE,
             {
-                "trading_pair": msg.get("trading_pair") or symbol,
+                "trading_pair": msg.get("trading_pair"),
                 "trade_type": trade_type,
                 "trade_id": trade_data["i"],
                 "update_id": ts,
@@ -120,3 +120,14 @@ class ChangellyOrderBook(OrderBook):
             },
             timestamp=ts,
         )
+
+    @classmethod
+    def _get_data_from_message(cls, msg: Dict[str, Any]) -> Dict[str, Any]:
+        data = {}
+        if "update" in msg:
+            data = msg.get("update", {})
+        elif "snapshot" in msg:
+            data = msg.get("snapshot", {})
+        else:
+            data = msg
+        return data
