@@ -56,16 +56,25 @@ class ChangellyAPIUserStreamDataSource(UserStreamTrackerDataSource):
         auth_response = ws_response.data
         if not auth_response.get("result"):
             raise Exception(f"Authentication failed. Error: {auth_response}")
+        return auth_response
 
-
-    async def _subscribe_channels(self, ws: WSAssistant):
+    async def _subscribe_channels(self, websocket_assistant: WSAssistant):
+        # Subscribe to spot channel
         subscribe_payload = {"method": CONSTANTS.SPOT_SUBSCRIBE, "params": {}, "id": self.SPOT_STREAM_ID}
         payload: WSJSONRequest = WSJSONRequest(payload=subscribe_payload)
-        await ws.send(payload)
+        await websocket_assistant.subscribe(payload)
+    
+        # Subscribe to spot balances
+        balance_payload = {
+            "method": CONSTANTS.SPOT_BALANCE_SUBSCRIBE,
+             "params": {
+                "mode": "updates"
+            },
+            "id": 3
+        }
+        await websocket_assistant.subscribe(WSJSONRequest(payload=balance_payload))
+            
         
-        # check result message
-        result_message = await ws.receive()
-        print(result_message)
     
     async def _on_user_stream_interruption(self, websocket_assistant: Optional[WSAssistant]):
         """
