@@ -5,5 +5,5 @@ from hummingbot.connector.exchange.changelly import changelly_constants as CONST
 
 class WebUtilsTests(TestCase):
     def test_rest_url(self):
-        url = web_utils.public_rest_url(path_url=CONSTANTS.ORDER_BOOK)
+        url = web_utils.public_rest_url(path_url=CONSTANTS.ORDER_BOOK_PATH)
         self.assertEqual("https://api.pro.changelly.com/api/3/public/orderbook", url)
