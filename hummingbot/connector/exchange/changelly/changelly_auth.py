@@ -32,7 +32,7 @@ class ChangellyAuth(AuthBase):
         """
         Generate the authentication message for the websocket connection.
         """
-        timestamp = int(self.time_provider.time() * 1e3)
+        timestamp = int(time.time() * 1e3)
         window = 10000
         message = str(timestamp)
         if window:
