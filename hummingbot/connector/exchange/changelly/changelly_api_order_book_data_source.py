@@ -43,7 +43,7 @@ class ChangellyAPIOrderBookDataSource(OrderBookTrackerDataSource):
         self._snapshot_messages_queue_key = CONSTANTS.SNAPSHOT_EVENT_TYPE
         self._domain = domain
         self._api_factory = api_factory 
-        
+
     async def get_last_traded_prices(self, 
                                      trading_pairs: List[str], 
                                      domain: Optional[str] = None) -> Dict[str, float]:
@@ -63,6 +63,7 @@ class ChangellyAPIOrderBookDataSource(OrderBookTrackerDataSource):
         path = CONSTANTS.ORDER_BOOK_PATH + "/" + symbol
         rest_assistant = await self._api_factory.get_rest_assistant()
         url = web_utils.public_rest_url(path)
+        # self.logger().info(f"Requesting order book snapshot for {trading_pair} at {url}...")
         data = await rest_assistant.execute_request(
             url=url,
             method=RESTMethod.GET,
@@ -70,10 +71,12 @@ class ChangellyAPIOrderBookDataSource(OrderBookTrackerDataSource):
         )
         return data
 
-    async def _subscribe_channels(self, ws: WSAssistant):
+    async def _subscribe_channels(self, websocket_assistant: WSAssistant):
         """
         Subscribes to the trade events and diff orders events through the provided websocket connection.
         """
+        # self.logger().info("Subscribing to public order book and trade channels...")
+        # print trading pairs
         try:
             for trading_pair in self._trading_pairs:
                 symbol = await self._connector.exchange_symbol_associated_to_pair(trading_pair=trading_pair)
@@ -92,9 +95,9 @@ class ChangellyAPIOrderBookDataSource(OrderBookTrackerDataSource):
                     "id": self.ORDERBOOK_STREAM_ID,
                 }
                 subscribe_orderbook_request: WSJSONRequest = WSJSONRequest(payload=depth_payload)
-
-                await ws.send(subscribe_trade_request)
-                await ws.send(subscribe_orderbook_request)
+                self.logger().info(f"Subscribing to public order book and trade channels of {trading_pair}...")
+                await websocket_assistant.subscribe(subscribe_trade_request)
+                await websocket_assistant.subscribe(subscribe_orderbook_request)
 
                 self.logger().info(f"Subscribed to public order book and trade channels of {trading_pair}...")
         except asyncio.CancelledError:
@@ -114,7 +117,7 @@ class ChangellyAPIOrderBookDataSource(OrderBookTrackerDataSource):
     async def _order_book_snapshot(self, trading_pair: str) -> OrderBookMessage:
         snapshot: Dict[str, Any] = await self._request_order_book_snapshot(trading_pair)
         snapshot_timestamp: float = time.time()
-        # self.logger().debug(f"Order book snapshot for {trading_pair} at {snapshot_timestamp}: {snapshot}")
+        self.logger().debug(f"Order book snapshot for {trading_pair} at {snapshot_timestamp}: {snapshot}")
         snapshot_msg: OrderBookMessage = ChangellyOrderBook.snapshot_message_from_exchange(
             snapshot,
             snapshot_timestamp,
@@ -130,9 +133,12 @@ class ChangellyAPIOrderBookDataSource(OrderBookTrackerDataSource):
                 data = raw_message.get("update", {})
             elif "snapshot" in raw_message:
                 data = raw_message.get("snapshot", {})
+            elif "result" in raw_message:   
+                # not a trade message return 
+                return
             else:
                 self.logger().warning(f"Unexpected response from exchange: {raw_message}")
-
+                
             symbol = list(data.keys())[0]
             trading_pair = await self._connector.trading_pair_associated_to_exchange_symbol(symbol=symbol)
             trade_message = ChangellyOrderBook.trade_message_from_exchange(
@@ -141,9 +147,14 @@ class ChangellyAPIOrderBookDataSource(OrderBookTrackerDataSource):
 
     async def _parse_order_book_diff_message(self, raw_message: Dict[str, Any], message_queue: asyncio.Queue):     
         channel = raw_message.get("ch")
-        if "update" in raw_message and channel == CONSTANTS.ORDER_BOOK_CHANNEL:
-            update = raw_message.get("update", {})
-            symbol = list(update.keys())[0]
+        if channel == CONSTANTS.ORDER_BOOK_CHANNEL:
+            data = {}
+            if "update" in raw_message:
+                data = raw_message.get("update", {})
+            elif "snapshot" in raw_message:
+                data = raw_message.get("snapshot", {})
+            
+            symbol = list(data.keys())[0]
             trading_pair = await self._connector.trading_pair_associated_to_exchange_symbol(symbol=symbol)
             order_book_message: OrderBookMessage = ChangellyOrderBook.diff_message_from_exchange(
                 raw_message, time.time(), {"trading_pair": trading_pair})
@@ -156,8 +167,6 @@ class ChangellyAPIOrderBookDataSource(OrderBookTrackerDataSource):
         if ws_channel == CONSTANTS.TRADES_CHANNEL:
             channel = self._trade_messages_queue_key
         elif ws_channel == CONSTANTS.ORDER_BOOK_CHANNEL:
-            channel = self._diff_messages_queue_key
-            if "snapshot" in event_message:
-                channel = self._trade_messages_queue_key
+            channel = self._diff_messages_queue_key    
         return channel
 
