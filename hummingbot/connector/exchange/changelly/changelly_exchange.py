@@ -312,8 +312,10 @@ class ChangellyExchange(ExchangePyBase):
                     # Check if it's a trade event
                     if data.get("report_type") == "trade":
                         if tracked_order is not None:
-                            # Calculate fees and create TradeUpdate (adjust fields as needed)
-                            fee = TradeFeeBase(...)  # Add appropriate parameters
+                            fee = TradeFeeBase.new_spot_fee(
+                                fee_schema=self.trade_fee_schema(),
+                                trade_type=tracked_order.trade_type,
+                            )
                             trade_update = TradeUpdate(
                                 trade_id=str(data["trade_id"]),
                                 client_order_id=client_order_id,
@@ -358,7 +360,6 @@ class ChangellyExchange(ExchangePyBase):
             try:
                 if order.exchange_order_id is not None:
                     order_info = next((o for o in active_orders if o["client_order_id"] == order.client_order_id), {})         
-                    self.logger().info(f"Order info: {order_info}")
                     trade_updates = await self._all_trade_updates_for_order(order=order)
                     for trade_update in trade_updates:
                         self._order_tracker.process_trade_update(trade_update)
@@ -369,7 +370,6 @@ class ChangellyExchange(ExchangePyBase):
                     f"Failed to fetch trade updates for order {order.client_order_id}. Error: {request_error}",
                     exc_info=request_error,
                 )
-
 
     async def _all_trade_updates_for_order(self, order: InFlightOrder) -> List[TradeUpdate]:
         # TODO: Implement this method correctly for the connector
