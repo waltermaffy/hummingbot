@@ -63,7 +63,7 @@ class ChangellyAPIOrderBookDataSource(OrderBookTrackerDataSource):
         path = CONSTANTS.ORDER_BOOK_PATH + "/" + symbol
         rest_assistant = await self._api_factory.get_rest_assistant()
         url = web_utils.public_rest_url(path)
-        # self.logger().info(f"Requesting order book snapshot for {trading_pair} at {url}...")
+        self.logger().info(f"Requesting order book snapshot for {trading_pair} at {url}...")
         data = await rest_assistant.execute_request(
             url=url,
             method=RESTMethod.GET,
@@ -116,8 +116,7 @@ class ChangellyAPIOrderBookDataSource(OrderBookTrackerDataSource):
     
     async def _order_book_snapshot(self, trading_pair: str) -> OrderBookMessage:
         snapshot: Dict[str, Any] = await self._request_order_book_snapshot(trading_pair)
-        snapshot_timestamp: float = time.time()
-        self.logger().debug(f"Order book snapshot for {trading_pair} at {snapshot_timestamp}: {snapshot}")
+        snapshot_timestamp = web_utils.convert_to_unix_timestamp(snapshot["timestamp"])
         snapshot_msg: OrderBookMessage = ChangellyOrderBook.snapshot_message_from_exchange(
             snapshot,
             snapshot_timestamp,
@@ -146,20 +145,25 @@ class ChangellyAPIOrderBookDataSource(OrderBookTrackerDataSource):
             message_queue.put_nowait(trade_message)
 
     async def _parse_order_book_diff_message(self, raw_message: Dict[str, Any], message_queue: asyncio.Queue):     
-        channel = raw_message.get("ch")
-        if channel == CONSTANTS.ORDER_BOOK_CHANNEL:
-            data = {}
-            if "update" in raw_message:
-                data = raw_message.get("update", {})
-            elif "snapshot" in raw_message:
-                data = raw_message.get("snapshot", {})
-            
-            symbol = list(data.keys())[0]
-            trading_pair = await self._connector.trading_pair_associated_to_exchange_symbol(symbol=symbol)
-            order_book_message: OrderBookMessage = ChangellyOrderBook.diff_message_from_exchange(
-                raw_message, time.time(), {"trading_pair": trading_pair})
-            
-            message_queue.put_nowait(order_book_message)
+        try:
+            channel = raw_message.get("ch")
+            if channel == CONSTANTS.ORDER_BOOK_CHANNEL:
+                data = {}
+                if "update" in raw_message:
+                    data = raw_message.get("update", {})
+                elif "snapshot" in raw_message:
+                    data = raw_message.get("snapshot", {})
+                
+                symbol = list(data.keys())[0]
+                trading_pair = await self._connector.trading_pair_associated_to_exchange_symbol(symbol=symbol)
+                order_book_message: OrderBookMessage = ChangellyOrderBook.diff_message_from_exchange(
+                    raw_message, time.time(), {"trading_pair": trading_pair})
+                
+                message_queue.put_nowait(order_book_message)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            self.logger().exception("Unexpected error when processing public order book updates from exchange")
 
     def _channel_originating_message(self, event_message: Dict[str, Any]) -> str:
         channel = ""
