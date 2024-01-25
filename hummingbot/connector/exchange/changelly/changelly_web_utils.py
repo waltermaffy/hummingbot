@@ -59,7 +59,10 @@ async def get_current_server_time(
         method=RESTMethod.GET,
         throttler_limit_id=CONSTANTS.ORDER_BOOK_PATH,
     )
-    first_symbol = list(response.keys())[0]
-    exchange_timestamp = response[first_symbol]["timestamp"]
-    server_time = convert_to_unix_timestamp(exchange_timestamp)
+    try:
+        first_symbol = list(response.keys())[0]
+        exchange_timestamp = response[first_symbol]["timestamp"]
+        server_time = convert_to_unix_timestamp(exchange_timestamp)
+    except Exception as e:
+        server_time = time.time()
     return server_time

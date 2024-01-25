@@ -78,7 +78,6 @@ class ChangellyOrderBook(OrderBook):
         symbol = list(data.keys())[0]
         data = data[symbol]
         
-        ts = data["t"] if not timestamp else timestamp
         return OrderBookMessage(
             OrderBookMessageType.DIFF,
             {
@@ -87,7 +86,7 @@ class ChangellyOrderBook(OrderBook):
                 "bids": data["b"],
                 "asks": data["a"],
             },
-            timestamp=ts,
+            timestamp=timestamp,
         )
 
     @classmethod
@@ -106,7 +105,7 @@ class ChangellyOrderBook(OrderBook):
 
         symbol = list(data.keys())[0]
         trade_data = data[symbol][0]
-        ts = trade_data["t"]
+        ts = int(trade_data["t"])
         seq_num = trade_data["s"]
         trade_type = TradeType.BUY if trade_data["s"] == "buy" else TradeType.SELL
 
@@ -120,7 +119,7 @@ class ChangellyOrderBook(OrderBook):
                 "price": trade_data["p"],
                 "amount": trade_data["q"],
             },
-            timestamp=ts,
+            timestamp=ts * 1e-3,
         )
 
     @classmethod
