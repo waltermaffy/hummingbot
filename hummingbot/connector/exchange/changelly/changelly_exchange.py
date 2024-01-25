@@ -354,7 +354,9 @@ class ChangellyExchange(ExchangePyBase):
                 await self._sleep(5.0)
 
     async def _update_orders_fills(self, orders: List[InFlightOrder]):
-        # TODO: Update orders using websocket channel insted of polling 
+        # This method in the base ExchangePyBase, makes an API call for each order.
+        # Given the rate limit of the API method and the breadth of info provided by the method
+        # the mitigation proposal is to collect all orders in one shot, then parse them
         active_orders = await self._get_active_orders()
         for order in orders:
             try:
@@ -446,12 +448,12 @@ class ChangellyExchange(ExchangePyBase):
         # Find the order with the matching client_order_id
         order_info = next((order for order in active_orders if order["client_order_id"] == tracked_order.client_order_id), {})         
         new_state = CONSTANTS.ORDER_STATE[order_info["status"]]
-
+        update_timestamp = web_utils.convert_to_unix_timestamp(order_info["updated_at"])
         order_update = OrderUpdate(
             client_order_id=tracked_order.client_order_id,
             exchange_order_id=str(order_info["id"]),
             trading_pair=tracked_order.trading_pair,
-            update_timestamp=int(order_info["updated_at"]),
+            update_timestamp=update_timestamp,
             new_state=new_state,
         )
 
