@@ -20,10 +20,6 @@ class ChangellyOrderBook(OrderBook):
         if metadata:
             msg.update(metadata)
 
-        # snapshot = msg.get("snapshot", {})
-        # symbol = list(snapshot.keys())[0]
-        # data = snapshot[symbol]
-
         return OrderBookMessage(
             OrderBookMessageType.SNAPSHOT,
             {
@@ -82,7 +78,7 @@ class ChangellyOrderBook(OrderBook):
             OrderBookMessageType.DIFF,
             {
                 "trading_pair": msg.get("trading_pair"),
-                "update_id": data["s"],
+                "update_id": data["t"],
                 "bids": data["b"],
                 "asks": data["a"],
             },
@@ -106,7 +102,6 @@ class ChangellyOrderBook(OrderBook):
         symbol = list(data.keys())[0]
         trade_data = data[symbol][0]
         ts = int(trade_data["t"])
-        seq_num = trade_data["s"]
         trade_type = TradeType.BUY if trade_data["s"] == "buy" else TradeType.SELL
 
         return OrderBookMessage(
@@ -115,7 +110,7 @@ class ChangellyOrderBook(OrderBook):
                 "trading_pair": msg.get("trading_pair"),
                 "trade_type": trade_type,
                 "trade_id": trade_data["i"],
-                "update_id": seq_num,
+                "update_id": ts,
                 "price": trade_data["p"],
                 "amount": trade_data["q"],
             },

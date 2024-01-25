@@ -18,6 +18,7 @@ from hummingbot.connector.exchange.changelly.changelly_api_user_stream_data_sour
 from hummingbot.connector.exchange.changelly.changelly_auth import ChangellyAuth
 from hummingbot.connector.exchange_py_base import ExchangePyBase
 from hummingbot.connector.trading_rule import TradingRule
+from hummingbot.core.data_type.order_book import OrderBook
 from hummingbot.connector.utils import TradeFillOrderDetails, combine_to_hb_trading_pair
 from hummingbot.core.data_type.common import OrderType, TradeType
 from hummingbot.core.data_type.in_flight_order import InFlightOrder, OrderUpdate, TradeUpdate
@@ -248,7 +249,7 @@ class ChangellyExchange(ExchangePyBase):
         data = message.data
         if "result" in data:
             result = data["result"]
-            if result["status"] == "cancelled":
+            if result["status"] == "canceled":
                 return True
         return False
 
@@ -374,9 +375,36 @@ class ChangellyExchange(ExchangePyBase):
                 )
 
     async def _all_trade_updates_for_order(self, order: InFlightOrder) -> List[TradeUpdate]:
-        # TODO: Implement this method correctly for the connector
+        #TODO: Update using websocket updates instead of REST
+        # Changelly return only the last state of the order
         trade_updates = []
         return trade_updates
+        # path = CONSTANTS.SPOT_ORDER_URL + "/" + order.client_order_id
+        # rest_assistant = await self._web_assistants_factory.get_rest_assistant()
+        # data = await rest_assistant.execute_request(
+        #     url=web_utils.public_rest_url(path),
+        #     method=RESTMethod.GET,
+        #     throttler_limit_id=CONSTANTS.SPOT_ORDER_URL,
+        #     is_auth_required=True
+        # )
+        # if data is not None:
+        #     fee = TradeFeeBase.new_spot_fee(
+        #         fee_schema=self.trade_fee_schema(),
+        #         trade_type=order.trade_type,
+        #     )
+        #     trade_update = TradeUpdate(
+        #         trade_id=str(data["trade_id"]),
+        #         client_order_id=order.client_order_id,
+        #         exchange_order_id=str(data["id"]),
+        #         trading_pair=order.trading_pair,
+        #         fee=fee,
+        #         fill_base_amount=Decimal(data["trade_quantity"]),
+        #         fill_quote_amount=Decimal(data["trade_quantity"]) * Decimal(data["trade_price"]),
+        #         fill_price=Decimal(data["trade_price"]),
+        #         fill_timestamp=update_timestamp,
+        #     )
+        #     self._order_tracker.process_trade_update(trade_update)
+        # return trade_updates
 
 
     async def _format_trading_rules(self, exchange_info_dict: Dict[str, Any]) -> List[TradingRule]:

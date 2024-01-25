@@ -13,6 +13,7 @@ WS_HEARTBEAT_TIME_INTERVAL = 30
 
 # Base URL
 REST_URL = "https://api.pro.changelly.com/api/3/public"
+SPOT_ORDER_URL = "https://api.pro.changelly.com/api/3/spot/order"
 WSS_MARKET_URL = "wss://api.pro.changelly.com/api/3/ws/public"
 WSS_TRADING_URL = "wss://api.pro.changelly.com/api/3/ws/trading"
 WSS_WALLET_URL = "wss://api.pro.changelly.com/api/3/ws/wallet"
@@ -27,7 +28,6 @@ TRADING_PAIRS_PATH_URL = "symbol"
 # SOCKET EVENTS
 SNAPSHOT_EVENT_TYPE = "snapshot"
 DIFF_EVENT_TYPE = "update"
-
 TRADE_EVENT_TYPE = "trade"
 ORDERBOOK_EVENT_TYPE = "orderbook"
 
@@ -107,6 +107,9 @@ RATE_LIMITS = [
               linked_limits=[LinkedLimitWeightPair(REQUEST_WEIGHT, 20),
                              LinkedLimitWeightPair(RAW_REQUESTS, 30)]),
     RateLimit(limit_id=ORDER_BOOK_PATH, limit=MAX_REQUEST, time_interval=ONE_MINUTE,
+              linked_limits=[LinkedLimitWeightPair(REQUEST_WEIGHT, 20),
+                             LinkedLimitWeightPair(RAW_REQUESTS, 30)]),
+    RateLimit(limit_id=SPOT_ORDER_URL, limit=MAX_REQUEST, time_interval=ONE_MINUTE,
               linked_limits=[LinkedLimitWeightPair(REQUEST_WEIGHT, 20),
                              LinkedLimitWeightPair(RAW_REQUESTS, 30)]),
     # Pools
