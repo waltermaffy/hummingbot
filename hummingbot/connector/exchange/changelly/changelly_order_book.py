@@ -22,12 +22,7 @@ class ChangellyOrderBook(OrderBook):
 
         return OrderBookMessage(
             OrderBookMessageType.SNAPSHOT,
-            {
-                "trading_pair": msg.get("trading_pair"),
-                "update_id": timestamp, 
-                "bids": msg["bid"], 
-                "asks": msg["ask"]
-            },
+            {"trading_pair": msg.get("trading_pair"), "update_id": timestamp, "bids": msg["bid"], "asks": msg["ask"]},
             timestamp=timestamp,
         )
 
@@ -73,7 +68,7 @@ class ChangellyOrderBook(OrderBook):
         data = cls._get_data_from_message(msg)
         symbol = list(data.keys())[0]
         data = data[symbol]
-        
+
         return OrderBookMessage(
             OrderBookMessageType.DIFF,
             {

@@ -1,16 +1,18 @@
 import hashlib
 import hmac
 import json
-from base64 import b64encode
-from typing import Dict, List, Any, Optional
-from urllib.parse import urlsplit
 import time
+from base64 import b64encode
+from typing import Any, Dict, List, Optional
+from urllib.parse import urlsplit
+
 from hummingbot.connector.time_synchronizer import TimeSynchronizer
 from hummingbot.core.web_assistant.auth import AuthBase
 from hummingbot.core.web_assistant.connections.data_types import RESTRequest
 
+
 class ChangellyAuth(AuthBase):
-    def __init__(self, api_key: str, secret_key: str, time_provider: Optional[TimeSynchronizer] = None ):
+    def __init__(self, api_key: str, secret_key: str, time_provider: Optional[TimeSynchronizer] = None):
         self.api_key = api_key
         self.secret_key = secret_key
         self.time_provider = time_provider
@@ -38,10 +40,16 @@ class ChangellyAuth(AuthBase):
         if window:
             message += str(window)
         sign = hmac.new(self.secret_key.encode(), message.encode(), hashlib.sha256).hexdigest()
-        
+
         return {
             "method": "login",
-            "params": {"type": "HS256", "api_key": self.api_key, "timestamp": timestamp, "window": window, "signature": sign},
+            "params": {
+                "type": "HS256",
+                "api_key": self.api_key,
+                "timestamp": timestamp,
+                "window": window,
+                "signature": sign,
+            },
         }
 
     def header_for_authentication(self, request: RESTRequest) -> Dict[str, str]:

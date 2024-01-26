@@ -47,8 +47,7 @@ class ChangellyAPIUserStreamDataSource(UserStreamTrackerDataSource):
         ws = None
         try:
             ws: WSAssistant = await self._api_factory.get_ws_assistant()
-            await ws.connect(ws_url=CONSTANTS.WSS_TRADING_URL,
-                                ping_timeout=CONSTANTS.WS_HEARTBEAT_TIME_INTERVAL)
+            await ws.connect(ws_url=CONSTANTS.WSS_TRADING_URL, ping_timeout=CONSTANTS.WS_HEARTBEAT_TIME_INTERVAL)
             auth_result = await self._authenticate_connection(ws)
             self.logger().info(f"User stream Authenticated to websocket: {auth_result}")
         except Exception as e:
@@ -61,9 +60,9 @@ class ChangellyAPIUserStreamDataSource(UserStreamTrackerDataSource):
                 await asyncio.sleep(CONSTANTS.RETRY_INTERVAL)
                 await self._connected_websocket_assistant()
             else:
-                raise Exception("Maximum retries exceeded. Could not connect to websocket.") 
+                raise Exception("Maximum retries exceeded. Could not connect to websocket.")
         return ws
-    
+
     async def _authenticate_connection(self, ws: WSAssistant):
         """
         Authenticates to the WebSocket service using the provided API key and secret.
@@ -81,24 +80,17 @@ class ChangellyAPIUserStreamDataSource(UserStreamTrackerDataSource):
         subscribe_payload = {"method": CONSTANTS.SPOT_SUBSCRIBE, "params": {}, "id": self.SPOT_STREAM_ID}
         payload: WSJSONRequest = WSJSONRequest(payload=subscribe_payload)
         await websocket_assistant.subscribe(payload)
-    
+
         # Subscribe to spot balances
-        balance_payload = {
-            "method": CONSTANTS.SPOT_BALANCE_SUBSCRIBE,
-             "params": {
-                "mode": "updates"
-            },
-            "id": 3
-        }
+        balance_payload = {"method": CONSTANTS.SPOT_BALANCE_SUBSCRIBE, "params": {"mode": "updates"}, "id": 3}
         await websocket_assistant.subscribe(WSJSONRequest(payload=balance_payload))
         sub_result = await websocket_assistant.receive()
         data = sub_result.data
         if data and "result" in data and data["result"] == True:
             self._user_stream_data_source_initialized = True
         else:
-            raise Exception(f"WebSocket Subscription failed. Error: {sub_result}")  
-        
-    
+            raise Exception(f"WebSocket Subscription failed. Error: {sub_result}")
+
     async def _on_user_stream_interruption(self, websocket_assistant: Optional[WSAssistant]):
         """
         Handles reconnection on user stream interruption.

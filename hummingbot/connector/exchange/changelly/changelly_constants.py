@@ -12,8 +12,8 @@ DEFAULT_DOMAIN = "com"
 WS_HEARTBEAT_TIME_INTERVAL = 30
 
 # WEBSOCKET RETRY LOGIC
-MAX_RETRIES = 20     # Maximum number of retries to connect to the websocket
-RETRY_INTERVAL = 3.0 # Interval between retries to connect to the websocket
+MAX_RETRIES = 20  # Maximum number of retries to connect to the websocket
+RETRY_INTERVAL = 3.0  # Interval between retries to connect to the websocket
 
 
 # Base URL
@@ -108,15 +108,24 @@ RAW_REQUESTS = "RAW_REQUESTS"
 
 RATE_LIMITS = [
     # Weighted Limits
-    RateLimit(limit_id=TRADING_PAIRS_PATH_URL, limit=MAX_REQUEST, time_interval=ONE_MINUTE,
-              linked_limits=[LinkedLimitWeightPair(REQUEST_WEIGHT, 20),
-                             LinkedLimitWeightPair(RAW_REQUESTS, 30)]),
-    RateLimit(limit_id=ORDER_BOOK_PATH, limit=MAX_REQUEST, time_interval=ONE_MINUTE,
-              linked_limits=[LinkedLimitWeightPair(REQUEST_WEIGHT, 20),
-                             LinkedLimitWeightPair(RAW_REQUESTS, 30)]),
-    RateLimit(limit_id=SPOT_ORDER_URL, limit=MAX_REQUEST, time_interval=ONE_MINUTE,
-              linked_limits=[LinkedLimitWeightPair(REQUEST_WEIGHT, 20),
-                             LinkedLimitWeightPair(RAW_REQUESTS, 30)]),
+    RateLimit(
+        limit_id=TRADING_PAIRS_PATH_URL,
+        limit=MAX_REQUEST,
+        time_interval=ONE_MINUTE,
+        linked_limits=[LinkedLimitWeightPair(REQUEST_WEIGHT, 20), LinkedLimitWeightPair(RAW_REQUESTS, 30)],
+    ),
+    RateLimit(
+        limit_id=ORDER_BOOK_PATH,
+        limit=MAX_REQUEST,
+        time_interval=ONE_MINUTE,
+        linked_limits=[LinkedLimitWeightPair(REQUEST_WEIGHT, 20), LinkedLimitWeightPair(RAW_REQUESTS, 30)],
+    ),
+    RateLimit(
+        limit_id=SPOT_ORDER_URL,
+        limit=MAX_REQUEST,
+        time_interval=ONE_MINUTE,
+        linked_limits=[LinkedLimitWeightPair(REQUEST_WEIGHT, 20), LinkedLimitWeightPair(RAW_REQUESTS, 30)],
+    ),
     # Pools
     RateLimit(limit_id=LOGIN, limit=MAX_REQUEST_LOGIN, time_interval=ONE_SECOND),
     RateLimit(limit_id=SPOT_SUBSCRIBE, limit=MAX_REQUEST_LOGIN, time_interval=ONE_SECOND),
@@ -136,8 +145,6 @@ RATE_LIMITS = [
     RateLimit(limit_id=WALLET_BALANCE, limit=MAX_REQUEST_WALLET, time_interval=ONE_SECOND),
     RateLimit(limit_id=WALLET_BALANCES, limit=MAX_REQUEST_WALLET, time_interval=ONE_SECOND),
     RateLimit(limit_id=TRANSACTIONS, limit=MAX_REQUEST_WALLET, time_interval=ONE_SECOND),
-
-
 ]
 
 ORDER_NOT_EXIST_ERROR_CODE = -2013

@@ -1,3 +1,6 @@
+import calendar
+import time
+from datetime import datetime
 from typing import Callable, Optional
 
 import hummingbot.connector.exchange.changelly.changelly_constants as CONSTANTS
@@ -7,9 +10,6 @@ from hummingbot.core.api_throttler.async_throttler import AsyncThrottler
 from hummingbot.core.web_assistant.auth import AuthBase
 from hummingbot.core.web_assistant.connections.data_types import RESTMethod
 from hummingbot.core.web_assistant.web_assistants_factory import WebAssistantsFactory
-from datetime import datetime 
-import time
-import calendar
 
 
 def public_rest_url(path: str, domain: Optional[str] = None) -> str:
@@ -42,14 +42,16 @@ def build_api_factory_without_time_synchronizer_pre_processor(throttler: AsyncTh
 def create_throttler() -> AsyncThrottler:
     return AsyncThrottler(CONSTANTS.RATE_LIMITS)
 
+
 def convert_to_unix_timestamp(iso_time):
     dt = datetime.strptime(iso_time, "%Y-%m-%dT%H:%M:%S.%fZ")
     unix_timestamp = calendar.timegm(dt.utctimetuple())
     return unix_timestamp
 
+
 async def get_current_server_time(
-        throttler: Optional[AsyncThrottler] = None,
-        domain: str = CONSTANTS.DEFAULT_DOMAIN,
+    throttler: Optional[AsyncThrottler] = None,
+    domain: str = CONSTANTS.DEFAULT_DOMAIN,
 ) -> float:
     throttler = throttler or create_throttler()
     api_factory = build_api_factory_without_time_synchronizer_pre_processor(throttler=throttler)
