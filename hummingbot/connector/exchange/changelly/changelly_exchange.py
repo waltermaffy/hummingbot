@@ -66,6 +66,7 @@ class ChangellyExchange(ExchangePyBase):
         self._ws_assistant = None
 
         self.user_ws = None
+        self.retry_left = CONSTANTS.MAX_RETRIES
 
     @staticmethod
     def changelly_order_type(order_type: OrderType) -> str:
@@ -151,13 +152,27 @@ class ChangellyExchange(ExchangePyBase):
         )
 
     async def _connected_websocket_assistant(self) -> WSAssistant:
-        ws: WSAssistant = await self._web_assistants_factory.get_ws_assistant()
-        await ws.connect(ws_url=CONSTANTS.WSS_TRADING_URL,
-                            ping_timeout=CONSTANTS.WS_HEARTBEAT_TIME_INTERVAL)
-        await self._authenticate_connection(ws)
+        ws = None
+        try:
+            ws: WSAssistant = await self._web_assistants_factory.get_ws_assistant()
+            await ws.connect(ws_url=CONSTANTS.WSS_TRADING_URL,
+                                ping_timeout=CONSTANTS.WS_HEARTBEAT_TIME_INTERVAL)
+            auth_result = await self._authenticate_connection(ws)
+            # self.logger().info(f"Authenticated to websocket: {auth_result}")
+        except Exception as e:
+            self.logger().error(f"Error connecting to websocket: {str(e)}", exc_info=True)
+            # Retry connection
+            if self.retry_left > 0:
+                self.retry_left -= 1
+                self.logger().info(f"Retrying connection to websocket in {CONSTANTS.RETRY_INTERVAL} seconds...")
+                self.logger().info(f"Retries left: {self.retry_left}")
+                await asyncio.sleep(CONSTANTS.RETRY_INTERVAL)
+                await self._connected_websocket_assistant()
+            else:
+                raise Exception("Maximum retries exceeded. Could not connect to websocket.") 
         return ws
     
-    async def _authenticate_connection(self, ws: WSAssistant):
+    async def _authenticate_connection(self, ws: WSAssistant) -> bool:
         """
         Authenticates to the WebSocket service using the provided API key and secret.
         """
@@ -168,7 +183,8 @@ class ChangellyExchange(ExchangePyBase):
         auth_response = ws_response.data
         if not auth_response.get("result"):
             raise Exception(f"Authentication failed. Error: {auth_response}")
-        
+        return True
+
     async def _get_ws_assistant(self) -> WSAssistant:
         """
         Retrieves a websocket assistant.
@@ -375,36 +391,9 @@ class ChangellyExchange(ExchangePyBase):
                 )
 
     async def _all_trade_updates_for_order(self, order: InFlightOrder) -> List[TradeUpdate]:
-        #TODO: Update using websocket updates instead of REST
-        # Changelly return only the last state of the order
+        #TODO: Update using websocket updates for user trades. Changelly REST api returns only the last state of the order
         trade_updates = []
         return trade_updates
-        # path = CONSTANTS.SPOT_ORDER_URL + "/" + order.client_order_id
-        # rest_assistant = await self._web_assistants_factory.get_rest_assistant()
-        # data = await rest_assistant.execute_request(
-        #     url=web_utils.public_rest_url(path),
-        #     method=RESTMethod.GET,
-        #     throttler_limit_id=CONSTANTS.SPOT_ORDER_URL,
-        #     is_auth_required=True
-        # )
-        # if data is not None:
-        #     fee = TradeFeeBase.new_spot_fee(
-        #         fee_schema=self.trade_fee_schema(),
-        #         trade_type=order.trade_type,
-        #     )
-        #     trade_update = TradeUpdate(
-        #         trade_id=str(data["trade_id"]),
-        #         client_order_id=order.client_order_id,
-        #         exchange_order_id=str(data["id"]),
-        #         trading_pair=order.trading_pair,
-        #         fee=fee,
-        #         fill_base_amount=Decimal(data["trade_quantity"]),
-        #         fill_quote_amount=Decimal(data["trade_quantity"]) * Decimal(data["trade_price"]),
-        #         fill_price=Decimal(data["trade_price"]),
-        #         fill_timestamp=update_timestamp,
-        #     )
-        #     self._order_tracker.process_trade_update(trade_update)
-        # return trade_updates
 
 
     async def _format_trading_rules(self, exchange_info_dict: Dict[str, Any]) -> List[TradingRule]:

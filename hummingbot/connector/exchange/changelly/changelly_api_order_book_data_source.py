@@ -43,7 +43,7 @@ class ChangellyAPIOrderBookDataSource(OrderBookTrackerDataSource):
         self._snapshot_messages_queue_key = CONSTANTS.SNAPSHOT_EVENT_TYPE
         self._domain = domain
         self._api_factory = api_factory 
-
+        
     async def get_last_traded_prices(self, 
                                      trading_pairs: List[str], 
                                      domain: Optional[str] = None) -> Dict[str, float]:
@@ -63,7 +63,7 @@ class ChangellyAPIOrderBookDataSource(OrderBookTrackerDataSource):
         path = CONSTANTS.ORDER_BOOK_PATH + "/" + symbol
         rest_assistant = await self._api_factory.get_rest_assistant()
         url = web_utils.public_rest_url(path)
-        self.logger().info(f"Requesting order book snapshot for {trading_pair} at {url}...")
+        self.logger().debug(f"Requesting order book snapshot for {trading_pair} at {url}...")
         data = await rest_assistant.execute_request(
             url=url,
             method=RESTMethod.GET,

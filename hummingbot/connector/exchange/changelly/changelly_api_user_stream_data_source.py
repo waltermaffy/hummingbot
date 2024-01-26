@@ -36,14 +36,32 @@ class ChangellyAPIUserStreamDataSource(UserStreamTrackerDataSource):
         self._trading_pairs = trading_pairs
         self._listen_key_initialized_event: asyncio.Event = asyncio.Event()
         self._last_listen_key_ping_ts = 0
+        self._user_stream_data_source_initialized = False
+        self.retry_left = CONSTANTS.MAX_RETRIES
+
+    @property
+    def ready(self) -> bool:
+        return self._user_stream_data_source_initialized
 
     async def _connected_websocket_assistant(self) -> WSAssistant:
-        """
-        Connects to the exchange's WebSocket service.
-        """
-        ws: WSAssistant = await self._get_ws_assistant()
-        await ws.connect(ws_url=CONSTANTS.WSS_TRADING_URL, ping_timeout=CONSTANTS.WS_HEARTBEAT_TIME_INTERVAL)
-        await self._authenticate_connection(ws)
+        ws = None
+        try:
+            ws: WSAssistant = await self._api_factory.get_ws_assistant()
+            await ws.connect(ws_url=CONSTANTS.WSS_TRADING_URL,
+                                ping_timeout=CONSTANTS.WS_HEARTBEAT_TIME_INTERVAL)
+            auth_result = await self._authenticate_connection(ws)
+            self.logger().info(f"User stream Authenticated to websocket: {auth_result}")
+        except Exception as e:
+            self.logger().error(f"Error connecting to websocket: {str(e)}", exc_info=True)
+            # Retry connection
+            if self.retry_left > 0:
+                self.retry_left -= 1
+                self.logger().info(f"Retrying connection to websocket in {CONSTANTS.RETRY_INTERVAL} seconds...")
+                self.logger().info(f"Retries left: {self.retry_left}")
+                await asyncio.sleep(CONSTANTS.RETRY_INTERVAL)
+                await self._connected_websocket_assistant()
+            else:
+                raise Exception("Maximum retries exceeded. Could not connect to websocket.") 
         return ws
     
     async def _authenticate_connection(self, ws: WSAssistant):
@@ -56,7 +74,7 @@ class ChangellyAPIUserStreamDataSource(UserStreamTrackerDataSource):
         auth_response = ws_response.data
         if not auth_response.get("result"):
             raise Exception(f"Authentication failed. Error: {auth_response}")
-        return auth_response
+        return True
 
     async def _subscribe_channels(self, websocket_assistant: WSAssistant):
         # Subscribe to spot channel
@@ -73,7 +91,12 @@ class ChangellyAPIUserStreamDataSource(UserStreamTrackerDataSource):
             "id": 3
         }
         await websocket_assistant.subscribe(WSJSONRequest(payload=balance_payload))
-            
+        sub_result = await websocket_assistant.receive()
+        data = sub_result.data
+        if data and "result" in data and data["result"] == True:
+            self._user_stream_data_source_initialized = True
+        else:
+            raise Exception(f"WebSocket Subscription failed. Error: {sub_result}")  
         
     
     async def _on_user_stream_interruption(self, websocket_assistant: Optional[WSAssistant]):
