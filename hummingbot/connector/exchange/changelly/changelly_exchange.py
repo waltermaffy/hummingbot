@@ -176,6 +176,17 @@ class ChangellyExchange(ExchangePyBase):
         })
         return status
 
+    @property
+    def ready(self) -> bool:
+        """
+        Returns True if the connector is ready to operate (all connections established with the exchange). If it is
+        not ready it returns False.
+        """
+        ready = all(self.status_dict.values())
+        if not ready:
+            self.logger().info(f"Connector not ready. Status: {self.status_dict}")
+        return ready
+    
     async def _connected_websocket_assistant(self) -> WSAssistant:
         ws = None
         try:
@@ -242,8 +253,13 @@ class ChangellyExchange(ExchangePyBase):
             },
             "id": self.ORDERS_STREAM_ID,
         }
-        ws_assistant = await self._connected_websocket_assistant()
-        await ws_assistant.send(WSJSONRequest(payload=order_request))
+        try:
+            ws_assistant = await self._connected_websocket_assistant()
+            await ws_assistant.send(WSJSONRequest(payload=order_request))
+        except Exception as e:
+            self.logger().error(f"Error placing order: {str(e)}", exc_info=True)
+            time.sleep(5.0)
+            raise e
         return (order_id, time.time())
 
     # async def _get_spot_fees(self):
@@ -276,21 +292,26 @@ class ChangellyExchange(ExchangePyBase):
 
     async def _place_cancel(self, order_id: str, tracked_order: InFlightOrder) -> bool:
         # Construct the order cancellation message and send via websocket
-        cancel_payload = {
-            "method": CONSTANTS.SPOT_CANCEL_ORDER,
-            "params": {"client_order_id": order_id},
-            "id": self.ORDERS_STREAM_ID,
-        }
-        ws_assistant = await self._connected_websocket_assistant()
-        await ws_assistant.send(WSJSONRequest(payload=cancel_payload))
-        message = await ws_assistant.receive()
-        data = message.data
-        if "result" in data:
-            result = data["result"]
-            if "status" in result and result["status"] == "canceled":
-                return True
-        return False
-
+        try:
+            cancel_payload = {
+                "method": CONSTANTS.SPOT_CANCEL_ORDER,
+                "params": {"client_order_id": order_id},
+                "id": self.ORDERS_STREAM_ID,
+            }
+            ws_assistant = await self._connected_websocket_assistant()
+            await ws_assistant.send(WSJSONRequest(payload=cancel_payload))
+            message = await ws_assistant.receive()
+            data = message.data
+            if "result" in data:
+                result = data["result"]
+                if "status" in result and result["status"] == "canceled":
+                    return True
+            return False
+        except Exception as e:
+            self.logger().error(f"Error canceling order: {str(e)}", exc_info=True)
+            time.sleep(5.0)
+            return False
+        
     def _is_order_not_found_during_status_update_error(self, status_update_exception: Exception) -> bool:
         # TODO: implement this method correctly for the connector
         self.logger().info(f"Error updating order status: {status_update_exception}")
@@ -463,16 +484,20 @@ class ChangellyExchange(ExchangePyBase):
             self.logger().error(f"Error updating balances: {str(e)}", exc_info=True)
 
     async def _get_active_orders(self):
-        ws: WSAssistant = await self._connected_websocket_assistant()
-        active_orders_payload = {"method": CONSTANTS.SPOT_GET_ORDERS, "params": {}, "id": self.ORDERS_STREAM_ID}
-        # Get active orders
-        await ws.send(WSJSONRequest(payload=active_orders_payload))
-        active_orders_response = await ws.receive()
-        data = active_orders_response.data
-        if not data or "result" not in data:
+        try:
+            ws: WSAssistant = await self._connected_websocket_assistant()
+            active_orders_payload = {"method": CONSTANTS.SPOT_GET_ORDERS, "params": {}, "id": self.ORDERS_STREAM_ID}
+            # Get active orders
+            await ws.send(WSJSONRequest(payload=active_orders_payload))
+            active_orders_response = await ws.receive()
+            data = active_orders_response.data
+            if not data or "result" not in data:
+                return []
+            return data["result"]
+        except Exception as e:
+            self.logger().error(f"Error getting active orders: {str(e)}", exc_info=True)
             return []
-        return data["result"]
-
+        
     async def _request_order_status(self, tracked_order: InFlightOrder) -> OrderUpdate:
         # Construct the request payload
         active_orders = await self._get_active_orders()

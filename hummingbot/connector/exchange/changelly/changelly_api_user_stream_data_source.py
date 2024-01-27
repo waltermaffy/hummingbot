@@ -82,20 +82,21 @@ class ChangellyAPIUserStreamDataSource(UserStreamTrackerDataSource):
 
     async def _subscribe_channels(self, websocket_assistant: WSAssistant):
         # Subscribe to spot channel
-        subscribe_payload = {"method": CONSTANTS.SPOT_SUBSCRIBE, "params": {}, "id": self.SPOT_STREAM_ID}
-        payload: WSJSONRequest = WSJSONRequest(payload=subscribe_payload)
-        await websocket_assistant.subscribe(payload)
-
-        # Subscribe to spot balances
-        balance_payload = {"method": CONSTANTS.SPOT_BALANCE_SUBSCRIBE, "params": {"mode": "updates"}, "id": 3}
-        await websocket_assistant.subscribe(WSJSONRequest(payload=balance_payload))
-        sub_result = await websocket_assistant.receive()
-        data = sub_result.data
-        if data and "result" in data and data["result"] == True:
+        try:
+            subscribe_payload = {"method": CONSTANTS.SPOT_SUBSCRIBE, "params": {}, "id": self.SPOT_STREAM_ID}
+            payload: WSJSONRequest = WSJSONRequest(payload=subscribe_payload)
+            await websocket_assistant.subscribe(payload)
+            # sub_result = await websocket_assistant.receive()
+            # Subscribe to spot balances
+            balance_payload = {"method": CONSTANTS.SPOT_BALANCE_SUBSCRIBE, "params": {"mode": "updates"}, "id": 3}
+            await websocket_assistant.subscribe(WSJSONRequest(payload=balance_payload))
+            self.logger().info("Successfully subscribed to spot balances")
             self._user_stream_data_source_initialized = True
-        else:
-            raise Exception(f"WebSocket Subscription failed. Error: {sub_result}")
-
+        except Exception as e:
+            self.logger().error(f"Error subscribing to websocket channels: {str(e)}", exc_info=True)
+            raise e
+        
+        
     async def listen_for_user_stream(self, output: asyncio.Queue):
         """
         Connects to the user private channel in the exchange using a websocket connection. With the established
