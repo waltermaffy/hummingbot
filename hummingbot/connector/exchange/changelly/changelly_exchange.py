@@ -168,15 +168,13 @@ class ChangellyExchange(ExchangePyBase):
             auth=self._auth, trading_pairs=self.trading_pairs, connector=self, api_factory=self._web_assistants_factory
         )
     
-    # @property
-    # def status_dict(self):
-    #     status = super().status_dict
-    #     status.update({
-    #         "order_books_initialized": self._orderbook_ds.ready,
-    #         "user_stream_initialized": self._user_stream_tracker.data_source.last_recv_time > 0,
-    #     })
-    #     # self.logger().info(f"NEW Status dict: {status}")
-    #     return status
+    @property
+    def status_dict(self):
+        status = super().status_dict
+        status.update({
+            "order_books_initialized": self._orderbook_ds.ready,
+        })
+        return status
 
     async def _connected_websocket_assistant(self) -> WSAssistant:
         ws = None
