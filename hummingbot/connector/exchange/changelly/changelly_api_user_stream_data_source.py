@@ -39,16 +39,21 @@ class ChangellyAPIUserStreamDataSource(UserStreamTrackerDataSource):
         self._user_stream_data_source_initialized = False
         self.retry_left = CONSTANTS.MAX_RETRIES
 
-    @property
-    def ready(self) -> bool:
-        return self._user_stream_data_source_initialized
 
+    @property
+    def last_recv_time(self) -> float:
+        if self._ws_assistant:
+            return self._ws_assistant.last_recv_time
+        return 0
+    
     async def _connected_websocket_assistant(self) -> WSAssistant:
         ws = None
+        
         try:
-            ws: WSAssistant = await self._api_factory.get_ws_assistant()
+            ws: WSAssistant = await self._get_ws_assistant()
             await ws.connect(ws_url=CONSTANTS.WSS_TRADING_URL, ping_timeout=CONSTANTS.WS_HEARTBEAT_TIME_INTERVAL)
             auth_result = await self._authenticate_connection(ws)
+            self._last_ws_message_sent_timestamp = self._time()
             self.logger().info(f"User stream Authenticated to websocket: {auth_result}")
         except Exception as e:
             self.logger().error(f"Error connecting to websocket: {str(e)}", exc_info=True)
@@ -91,6 +96,31 @@ class ChangellyAPIUserStreamDataSource(UserStreamTrackerDataSource):
         else:
             raise Exception(f"WebSocket Subscription failed. Error: {sub_result}")
 
+    async def listen_for_user_stream(self, output: asyncio.Queue):
+        """
+        Connects to the user private channel in the exchange using a websocket connection. With the established
+        connection listens to all balance events and order updates provided by the exchange, and stores them in the
+        output queue
+
+        :param output: the queue to use to store the received messages
+        """
+        while True:
+            try:
+                self._ws_assistant = await self._connected_websocket_assistant()
+                await self._subscribe_channels(websocket_assistant=self._ws_assistant)
+                await self._send_ping(websocket_assistant=self._ws_assistant)  # to update last_recv_timestamp
+                await self._process_websocket_messages(websocket_assistant=self._ws_assistant, queue=output)
+            except asyncio.CancelledError:
+                raise
+            except ConnectionError as connection_exception:
+                self.logger().warning(f"The websocket connection was closed ({connection_exception})")
+            except Exception:
+                self.logger().exception("Unexpected error while listening to user stream. Retrying after 5 seconds...")
+                await self._sleep(1.0)
+            finally:
+                await self._on_user_stream_interruption(websocket_assistant=self._ws_assistant)
+                
+
     async def _on_user_stream_interruption(self, websocket_assistant: Optional[WSAssistant]):
         """
         Handles reconnection on user stream interruption.
@@ -104,4 +134,5 @@ class ChangellyAPIUserStreamDataSource(UserStreamTrackerDataSource):
         """
         if self._ws_assistant is None:
             self._ws_assistant = await self._api_factory.get_ws_assistant()
+            self._user_stream_data_source_initialized = True
         return self._ws_assistant

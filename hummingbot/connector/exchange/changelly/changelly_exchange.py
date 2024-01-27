@@ -26,6 +26,7 @@ from hummingbot.core.data_type.order_book_tracker_data_source import OrderBookTr
 from hummingbot.core.data_type.trade_fee import DeductedFromReturnsTradeFee, TokenAmount, TradeFeeBase
 from hummingbot.core.data_type.user_stream_tracker_data_source import UserStreamTrackerDataSource
 from hummingbot.core.event.events import MarketEvent, OrderFilledEvent
+from hummingbot.core.network_iterator import NetworkStatus
 from hummingbot.core.utils.async_utils import safe_gather
 from hummingbot.core.utils.estimate_fee import build_trade_fee
 from hummingbot.core.web_assistant.connections.data_types import RESTMethod, WSJSONRequest
@@ -66,6 +67,8 @@ class ChangellyExchange(ExchangePyBase):
 
         self.user_ws = None
         self.retry_left = CONSTANTS.MAX_RETRIES
+
+        self._api_factory = self._create_web_assistants_factory()
 
     @staticmethod
     def changelly_order_type(order_type: OrderType) -> str:
@@ -122,6 +125,27 @@ class ChangellyExchange(ExchangePyBase):
     @property
     def client_order_id_prefix(self):
         return CONSTANTS.HBOT_ORDER_ID
+    
+    async def check_network(self) -> NetworkStatus:
+        """
+        This function is required by NetworkIterator base class and is called periodically to check
+        the network connection. Ping the network (or call any lightweight public API).
+        """
+        try:
+            rest_assistant = await self._api_factory.get_rest_assistant()
+            result = await rest_assistant.execute_request(
+                url=web_utils.public_rest_url(path=CONSTANTS.TRADING_PAIRS_PATH_URL, domain=self.domain),
+                method=RESTMethod.GET,
+                throttler_limit_id=CONSTANTS.TRADING_PAIRS_PATH_URL
+            )
+            if not result:
+                self.logger().warning("Changelly public API request failed. Please check network connection.")
+                return NetworkStatus.NOT_CONNECTED
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            return NetworkStatus.NOT_CONNECTED
+        return NetworkStatus.CONNECTED
 
     def supported_order_types(self):
         return [OrderType.LIMIT, OrderType.LIMIT_MAKER, OrderType.MARKET]
@@ -143,6 +167,16 @@ class ChangellyExchange(ExchangePyBase):
         return ChangellyAPIUserStreamDataSource(
             auth=self._auth, trading_pairs=self.trading_pairs, connector=self, api_factory=self._web_assistants_factory
         )
+    
+    # @property
+    # def status_dict(self):
+    #     status = super().status_dict
+    #     status.update({
+    #         "order_books_initialized": self._orderbook_ds.ready,
+    #         "user_stream_initialized": self._user_stream_tracker.data_source.last_recv_time > 0,
+    #     })
+    #     # self.logger().info(f"NEW Status dict: {status}")
+    #     return status
 
     async def _connected_websocket_assistant(self) -> WSAssistant:
         ws = None
@@ -255,16 +289,18 @@ class ChangellyExchange(ExchangePyBase):
         data = message.data
         if "result" in data:
             result = data["result"]
-            if result["status"] == "canceled":
+            if "status" in result and result["status"] == "canceled":
                 return True
         return False
 
     def _is_order_not_found_during_status_update_error(self, status_update_exception: Exception) -> bool:
         # TODO: implement this method correctly for the connector
+        self.logger().info(f"Error updating order status: {status_update_exception}")
         return False
 
     def _is_order_not_found_during_cancelation_error(self, cancelation_exception: Exception) -> bool:
         # TODO: implement this method correctly for the connector
+        self.logger().info(f"Error canceling order: {cancelation_exception}")
         return False
 
     def _is_request_exception_related_to_time_synchronizer(self, request_exception: Exception):
@@ -362,6 +398,9 @@ class ChangellyExchange(ExchangePyBase):
             try:
                 if order.exchange_order_id is not None:
                     order_info = next((o for o in active_orders if o["client_order_id"] == order.client_order_id), {})
+                    if not order_info:
+                        continue
+
                     trade_updates = await self._all_trade_updates_for_order(order=order)
                     for trade_update in trade_updates:
                         self._order_tracker.process_trade_update(trade_update)
@@ -374,7 +413,10 @@ class ChangellyExchange(ExchangePyBase):
                 )
 
     async def _all_trade_updates_for_order(self, order: InFlightOrder) -> List[TradeUpdate]:
-        # TODO: Update using websocket updates for user trades. Changelly REST api returns only the last state of the order
+        """TODO: Return all trades updates for an order. 
+        Since changelly does not provide REST api for it.  
+        We need to buffer the trade updates from by subscribing to websocket events.
+        """
         trade_updates = []
         return trade_updates
 
@@ -442,11 +484,17 @@ class ChangellyExchange(ExchangePyBase):
         order_info = next(
             (order for order in active_orders if order["client_order_id"] == tracked_order.client_order_id), {}
         )
-        new_state = CONSTANTS.ORDER_STATE[order_info["status"]]
-        update_timestamp = web_utils.convert_to_unix_timestamp(order_info["updated_at"])
+        if not order_info:
+            self.logger().warning(f"Order {tracked_order.client_order_id} not found in active orders in changelly.")
+            new_state = CONSTANTS.ORDER_STATE["canceled"]
+            update_timestamp = time.time()
+        else:
+            new_state = CONSTANTS.ORDER_STATE[order_info["status"]]
+            update_timestamp = web_utils.convert_to_unix_timestamp(order_info["updated_at"])
+        
         order_update = OrderUpdate(
             client_order_id=tracked_order.client_order_id,
-            exchange_order_id=str(order_info["id"]),
+            exchange_order_id=tracked_order.exchange_order_id,
             trading_pair=tracked_order.trading_pair,
             update_timestamp=update_timestamp,
             new_state=new_state,

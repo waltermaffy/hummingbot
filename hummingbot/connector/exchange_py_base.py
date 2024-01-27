@@ -666,6 +666,7 @@ class ExchangePyBase(ExchangeBase, ABC):
         - The background task to process the events received through the user stream tracker (websocket connection)
         """
         self._stop_network()
+        self.logger().info("Starting connector...")
         self.order_book_tracker.start()
         if self.is_trading_required:
             self._trading_rules_polling_task = safe_ensure_future(self._trading_rules_polling_loop())

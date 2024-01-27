@@ -43,6 +43,11 @@ class ChangellyAPIOrderBookDataSource(OrderBookTrackerDataSource):
         self._snapshot_messages_queue_key = CONSTANTS.SNAPSHOT_EVENT_TYPE
         self._domain = domain
         self._api_factory = api_factory
+        self._ready = False
+
+    @property
+    def ready(self) -> bool:
+        return self._ready
 
     async def get_last_traded_prices(self, trading_pairs: List[str], domain: Optional[str] = None) -> Dict[str, float]:
         return await self._connector.get_last_traded_prices(trading_pairs=trading_pairs)
@@ -74,7 +79,6 @@ class ChangellyAPIOrderBookDataSource(OrderBookTrackerDataSource):
         Subscribes to the trade events and diff orders events through the provided websocket connection.
         """
         # self.logger().info("Subscribing to public order book and trade channels...")
-        # print trading pairs
         try:
             for trading_pair in self._trading_pairs:
                 symbol = await self._connector.exchange_symbol_associated_to_pair(trading_pair=trading_pair)
@@ -98,12 +102,14 @@ class ChangellyAPIOrderBookDataSource(OrderBookTrackerDataSource):
                 await websocket_assistant.subscribe(subscribe_orderbook_request)
 
                 self.logger().info(f"Subscribed to public order book and trade channels of {trading_pair}...")
+                self._ready = True
         except asyncio.CancelledError:
             raise
         except Exception:
             self.logger().error(
                 "Unexpected error occurred subscribing to order book trading and delta streams...", exc_info=True
             )
+            self._ready = False
             raise
 
     async def _connected_websocket_assistant(self) -> WSAssistant:
