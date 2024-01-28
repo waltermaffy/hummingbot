@@ -132,18 +132,29 @@ class ChangellyExchange(ExchangePyBase):
         the network connection. Ping the network (or call any lightweight public API).
         """
         try:
+            self.logger().debug(f"Checking network status of {self.name}...")
             rest_assistant = await self._api_factory.get_rest_assistant()
+            url = web_utils.public_rest_url(path=CONSTANTS.CURRENCY_PATH, domain=self.domain)
             result = await rest_assistant.execute_request(
-                url=web_utils.public_rest_url(path=CONSTANTS.TRADING_PAIRS_PATH_URL, domain=self.domain),
+                url=url,
                 method=RESTMethod.GET,
-                throttler_limit_id=CONSTANTS.TRADING_PAIRS_PATH_URL
+                throttler_limit_id=CONSTANTS.CURRENCY_PATH
             )
             if not result:
                 self.logger().warning("Changelly public API request failed. Please check network connection.")
+                self.logger().warning(f"Request: {url}")
                 return NetworkStatus.NOT_CONNECTED
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except Exception as e:
+            self.logger().error(f"Unexpected error checking Changelly network status. {e}" , exc_info=True)
+            if self.retry_left > 0:
+                self.retry_left -= 1
+                self.logger().info(f"Retrying call GET to {url} in {CONSTANTS.RETRY_INTERVAL} seconds...")
+                self.logger().info(f"Retries left: {self.retry_left}")
+                await asyncio.sleep(CONSTANTS.RETRY_INTERVAL)
+                self._api_factory = self._create_web_assistants_factory()
+                await self.check_network()
             return NetworkStatus.NOT_CONNECTED
         return NetworkStatus.CONNECTED
 

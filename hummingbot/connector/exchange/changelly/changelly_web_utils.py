@@ -44,10 +44,12 @@ def create_throttler() -> AsyncThrottler:
 
 
 def convert_to_unix_timestamp(iso_time):
-    dt = datetime.strptime(iso_time, "%Y-%m-%dT%H:%M:%S.%fZ")
+    try:
+        dt = datetime.strptime(iso_time, "%Y-%m-%dT%H:%M:%S.%fZ")
+    except ValueError:
+        dt = datetime.strptime(iso_time, "%Y-%m-%dT%H:%M:%SZ")
     unix_timestamp = calendar.timegm(dt.utctimetuple())
     return unix_timestamp
-
 
 async def get_current_server_time(
     throttler: Optional[AsyncThrottler] = None,

@@ -28,6 +28,7 @@ PUBLIC_API_VERSION = "v3"
 # REST API ENDPOINTS
 ORDER_BOOK_PATH = "orderbook"
 TRADING_PAIRS_PATH_URL = "symbol"
+CURRENCY_PATH = "currency/BTC"
 
 
 # SOCKET EVENTS
@@ -122,6 +123,12 @@ RATE_LIMITS = [
     ),
     RateLimit(
         limit_id=SPOT_ORDER_URL,
+        limit=MAX_REQUEST,
+        time_interval=ONE_MINUTE,
+        linked_limits=[LinkedLimitWeightPair(REQUEST_WEIGHT, 20), LinkedLimitWeightPair(RAW_REQUESTS, 30)],
+    ),
+    RateLimit(
+        limit_id=CURRENCY_PATH,
         limit=MAX_REQUEST,
         time_interval=ONE_MINUTE,
         linked_limits=[LinkedLimitWeightPair(REQUEST_WEIGHT, 20), LinkedLimitWeightPair(RAW_REQUESTS, 30)],
