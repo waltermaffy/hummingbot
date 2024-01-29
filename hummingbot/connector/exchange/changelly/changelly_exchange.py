@@ -156,6 +156,7 @@ class ChangellyExchange(ExchangePyBase):
                 self._api_factory = self._create_web_assistants_factory()
                 await self.check_network()
             return NetworkStatus.NOT_CONNECTED
+        self.retry_left = CONSTANTS.MAX_RETRIES
         return NetworkStatus.CONNECTED
 
     def supported_order_types(self):
@@ -321,6 +322,8 @@ class ChangellyExchange(ExchangePyBase):
         except Exception as e:
             self.logger().error(f"Error canceling order: {str(e)}", exc_info=True)
             time.sleep(5.0)
+            # try reconnect
+            
             return False
         
     def _is_order_not_found_during_status_update_error(self, status_update_exception: Exception) -> bool:

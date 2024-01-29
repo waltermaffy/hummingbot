@@ -55,6 +55,7 @@ class ChangellyAPIUserStreamDataSource(UserStreamTrackerDataSource):
             auth_result = await self._authenticate_connection(ws)
             self._last_ws_message_sent_timestamp = self._time()
             self.logger().info(f"User stream Authenticated to websocket: {auth_result}")
+            self.retry_left = CONSTANTS.MAX_RETRIES
         except Exception as e:
             self.logger().error(f"Error connecting to websocket: {str(e)}", exc_info=True)
             # Retry connection
