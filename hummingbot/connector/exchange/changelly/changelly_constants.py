@@ -12,8 +12,9 @@ DEFAULT_DOMAIN = "com"
 WS_HEARTBEAT_TIME_INTERVAL = 30
 
 # WEBSOCKET RETRY LOGIC
-MAX_RETRIES = 20  # Maximum number of retries to connect to the websocket
+MAX_RETRIES = 50  # Maximum number of retries to connect to the websocket
 RETRY_INTERVAL = 60  # Interval between retries to connect to the websocket
+EXPONENTIAL_BACKOFF = 0.1
 
 # Base URL
 REST_URL = "https://api.pro.changelly.com/api/3/public"

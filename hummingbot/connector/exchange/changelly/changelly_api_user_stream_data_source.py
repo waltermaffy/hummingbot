@@ -37,7 +37,7 @@ class ChangellyAPIUserStreamDataSource(UserStreamTrackerDataSource):
         self._listen_key_initialized_event: asyncio.Event = asyncio.Event()
         self._last_listen_key_ping_ts = 0
         self._user_stream_data_source_initialized = False
-        self.retry_left = CONSTANTS.MAX_RETRIES
+        self.retry_left_ws = CONSTANTS.MAX_RETRIES
 
 
     @property
@@ -55,20 +55,20 @@ class ChangellyAPIUserStreamDataSource(UserStreamTrackerDataSource):
             auth_result = await self._authenticate_connection(ws)
             self._last_ws_message_sent_timestamp = self._time()
             self.logger().info(f"User stream Authenticated to websocket: {auth_result}")
-            self.retry_left = CONSTANTS.MAX_RETRIES
         except Exception as e:
             self.logger().error(f"Error connecting to websocket: {str(e)}", exc_info=True)
             # Retry connection
-            if self.retry_left > 0:
-                self.retry_left -= 1
-                self.logger().info(f"Retrying connection to websocket in {CONSTANTS.RETRY_INTERVAL} seconds...")
-                self.logger().info(f"Retries left: {self.retry_left}")
-                await asyncio.sleep(CONSTANTS.RETRY_INTERVAL)
+            if self.retry_left_ws > 0:
+                self.retry_left_ws -= 1
+                sleep_time = CONSTANTS.RETRY_INTERVAL * (1 + CONSTANTS.EXPONENTIAL_BACKOFF * (CONSTANTS.MAX_RETRIES - self.retry_left_ws))
+                self.logger().info(f"Retrying connection to websocket in {sleep_time} seconds...")
+                self.logger().info(f"Retries left: {self.retry_left_ws}")
+                await asyncio.sleep(sleep_time)
                 await self._connected_websocket_assistant()
             else:
                 raise Exception("Maximum retries exceeded. Could not connect to websocket.")
+        self.retry_left_ws = CONSTANTS.MAX_RETRIES
         return ws
-
     async def _authenticate_connection(self, ws: WSAssistant):
         """
         Authenticates to the WebSocket service using the provided API key and secret.

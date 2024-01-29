@@ -67,6 +67,7 @@ class ChangellyExchange(ExchangePyBase):
 
         self.user_ws = None
         self.retry_left = CONSTANTS.MAX_RETRIES
+        self.retry_left_ws = CONSTANTS.MAX_RETRIES
 
         self._api_factory = self._create_web_assistants_factory()
 
@@ -144,15 +145,17 @@ class ChangellyExchange(ExchangePyBase):
                 self.logger().warning("Changelly public API request failed. Please check network connection.")
                 self.logger().warning(f"Request: {url}")
                 return NetworkStatus.NOT_CONNECTED
+            
         except asyncio.CancelledError:
             raise
         except Exception as e:
             self.logger().error(f"Unexpected error checking Changelly network status. {e}" , exc_info=True)
             if self.retry_left > 0:
                 self.retry_left -= 1
-                self.logger().info(f"Retrying call GET to {url} in {CONSTANTS.RETRY_INTERVAL} seconds...")
+                sleep_time = CONSTANTS.RETRY_INTERVAL * (1 + CONSTANTS.EXPONENTIAL_BACKOFF * (CONSTANTS.MAX_RETRIES - self.retry_left))
+                self.logger().info(f"Retrying call GET to {url} in {sleep_time} seconds...")
                 self.logger().info(f"Retries left: {self.retry_left}")
-                await asyncio.sleep(CONSTANTS.RETRY_INTERVAL)
+                await asyncio.sleep(sleep_time)
                 self._api_factory = self._create_web_assistants_factory()
                 await self.check_network()
             return NetworkStatus.NOT_CONNECTED
@@ -209,14 +212,16 @@ class ChangellyExchange(ExchangePyBase):
         except Exception as e:
             self.logger().error(f"Error connecting to websocket: {str(e)}", exc_info=True)
             # Retry connection
-            if self.retry_left > 0:
-                self.retry_left -= 1
-                self.logger().info(f"Retrying connection to websocket in {CONSTANTS.RETRY_INTERVAL} seconds...")
-                self.logger().info(f"Retries left: {self.retry_left}")
-                await asyncio.sleep(CONSTANTS.RETRY_INTERVAL)
+            if self.retry_left_ws > 0:
+                self.retry_left_ws -= 1
+                sleep_time = CONSTANTS.RETRY_INTERVAL * (1 + CONSTANTS.EXPONENTIAL_BACKOFF * (CONSTANTS.MAX_RETRIES - self.retry_left_ws))
+                self.logger().info(f"Retrying connection to websocket in {sleep_time} seconds...")
+                self.logger().info(f"Retries left: {self.retry_left_ws}")
+                await asyncio.sleep(sleep_time)
                 await self._connected_websocket_assistant()
             else:
                 raise Exception("Maximum retries exceeded. Could not connect to websocket.")
+        self.retry_left_ws = CONSTANTS.MAX_RETRIES
         return ws
 
     async def _authenticate_connection(self, ws: WSAssistant) -> bool:
@@ -310,6 +315,7 @@ class ChangellyExchange(ExchangePyBase):
                 "params": {"client_order_id": order_id},
                 "id": self.ORDERS_STREAM_ID,
             }
+            self.logger().info(f"Canceling order {order_id}...")
             ws_assistant = await self._connected_websocket_assistant()
             await ws_assistant.send(WSJSONRequest(payload=cancel_payload))
             message = await ws_assistant.receive()
