@@ -273,6 +273,11 @@ class ChangellyExchange(ExchangePyBase):
         try:
             ws_assistant = await self._connected_websocket_assistant()
             await ws_assistant.send(WSJSONRequest(payload=order_request))
+            response = await ws_assistant.receive()
+            data = response.data
+            # log data recevied from WS
+            if "error" in data:
+                raise Exception(f"Error placing order: {data['error']}")
         except Exception as e:
             self.logger().error(f"Error placing order: {str(e)}", exc_info=True)
             time.sleep(5.0)
