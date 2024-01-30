@@ -18,8 +18,16 @@ def public_rest_url(path: str, domain: Optional[str] = None) -> str:
     :param path: a public REST endpoint
     :return: the full URL to the endpoint
     """
-    return CONSTANTS.REST_URL + "/" + path
+    return CONSTANTS.REST_URL + "public/" + path
 
+def private_rest_url(path_url: str, domain: str = CONSTANTS.DEFAULT_DOMAIN) -> str:
+    """
+    Creates a full URL for provided private REST endpoint
+    :param path_url: a private REST endpoint
+    :param domain: the domain to connect to
+    :return: None, we use overwrite_url instead
+    """
+    return CONSTANTS.REST_URL + path_url
 
 def build_api_factory(
     throttler: Optional[AsyncThrottler] = None,

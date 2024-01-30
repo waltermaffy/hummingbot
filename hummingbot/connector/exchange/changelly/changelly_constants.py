@@ -17,7 +17,7 @@ RETRY_INTERVAL = 60  # Interval between retries to connect to the websocket
 EXPONENTIAL_BACKOFF = 0.1
 
 # Base URL
-REST_URL = "https://api.pro.changelly.com/api/3/public"
+REST_URL = "https://api.pro.changelly.com/api/3/"
 SPOT_ORDER_URL = "https://api.pro.changelly.com/api/3/spot/order"
 WSS_MARKET_URL = "wss://api.pro.changelly.com/api/3/ws/public"
 WSS_TRADING_URL = "wss://api.pro.changelly.com/api/3/ws/trading"
@@ -29,6 +29,8 @@ PUBLIC_API_VERSION = "v3"
 ORDER_BOOK_PATH = "orderbook"
 TRADING_PAIRS_PATH_URL = "symbol"
 CURRENCY_PATH = "currency/BTC"
+BALANCE = "spot/balance"
+ORDER = "spot/order"
 
 
 # SOCKET EVENTS
@@ -129,6 +131,18 @@ RATE_LIMITS = [
     ),
     RateLimit(
         limit_id=CURRENCY_PATH,
+        limit=MAX_REQUEST,
+        time_interval=ONE_MINUTE,
+        linked_limits=[LinkedLimitWeightPair(REQUEST_WEIGHT, 20), LinkedLimitWeightPair(RAW_REQUESTS, 30)],
+    ),    
+    RateLimit(
+        limit_id=BALANCE,
+        limit=MAX_REQUEST,
+        time_interval=ONE_MINUTE,
+        linked_limits=[LinkedLimitWeightPair(REQUEST_WEIGHT, 20), LinkedLimitWeightPair(RAW_REQUESTS, 30)],
+    ),
+    RateLimit(
+        limit_id=ORDER,
         limit=MAX_REQUEST,
         time_interval=ONE_MINUTE,
         linked_limits=[LinkedLimitWeightPair(REQUEST_WEIGHT, 20), LinkedLimitWeightPair(RAW_REQUESTS, 30)],

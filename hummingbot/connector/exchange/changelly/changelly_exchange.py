@@ -63,13 +63,14 @@ class ChangellyExchange(ExchangePyBase):
         self._trading_pairs = trading_pairs
         self._last_trades_poll_changelly_timestamp = 1.0
         super().__init__(client_config_map)
-        self._ws_assistant = None
 
-        self.user_ws = None
         self.retry_left = CONSTANTS.MAX_RETRIES
         self.retry_left_ws = CONSTANTS.MAX_RETRIES
 
         self._api_factory = self._create_web_assistants_factory()
+        self.ws_connections = {}  # Dictionary to manage WebSocket connections
+        self._ws_lock = asyncio.Lock()
+
 
     @staticmethod
     def changelly_order_type(order_type: OrderType) -> str:
@@ -202,13 +203,19 @@ class ChangellyExchange(ExchangePyBase):
             self.logger().info(f"Connector not ready. Status: {self.status_dict}")
         return ready
     
-    async def _connected_websocket_assistant(self) -> WSAssistant:
+
+    async def _connected_websocket_assistant(self, ws_type: str) -> WSAssistant:
+        if ws_type not in self.ws_connections or self.ws_connections[ws_type].last_recv_time == 0:
+            self.logger().info(f"Creating new websocket assistant for {ws_type}...")
+            self.ws_connections[ws_type] = await self._create_new_websocket_assistant(ws_type)
+        return self.ws_connections[ws_type]
+
+    async def _create_new_websocket_assistant(self, ws_type: str) -> WSAssistant:
         ws = None
         try:
             ws: WSAssistant = await self._web_assistants_factory.get_ws_assistant()
             await ws.connect(ws_url=CONSTANTS.WSS_TRADING_URL, ping_timeout=CONSTANTS.WS_HEARTBEAT_TIME_INTERVAL)
-            auth_result = await self._authenticate_connection(ws)
-            # self.logger().info(f"Authenticated to websocket: {auth_result}")
+            await self._authenticate_connection(ws)
         except Exception as e:
             self.logger().error(f"Error connecting to websocket: {str(e)}", exc_info=True)
             # Retry connection
@@ -218,33 +225,25 @@ class ChangellyExchange(ExchangePyBase):
                 self.logger().info(f"Retrying connection to websocket in {sleep_time} seconds...")
                 self.logger().info(f"Retries left: {self.retry_left_ws}")
                 await asyncio.sleep(sleep_time)
-                await self._connected_websocket_assistant()
+                await self._create_new_websocket_assistant()
             else:
                 raise Exception("Maximum retries exceeded. Could not connect to websocket.")
         self.retry_left_ws = CONSTANTS.MAX_RETRIES
         return ws
-
-    async def _authenticate_connection(self, ws: WSAssistant) -> bool:
+    
+    
+    async def _authenticate_connection(self, ws: WSAssistant):
         """
         Authenticates to the WebSocket service using the provided API key and secret.
         """
         login_payload = self.authenticator.ws_authenticate()
         auth_message: WSJSONRequest = WSJSONRequest(payload=login_payload)
         await ws.send(auth_message)
-        ws_response = await ws.receive()
+        async with self._ws_lock:
+            ws_response = await ws.receive()
         auth_response = ws_response.data
         if not auth_response.get("result"):
             raise Exception(f"Authentication failed. Error: {auth_response}")
-        return True
-
-    async def _get_ws_assistant(self) -> WSAssistant:
-        """
-        Retrieves a websocket assistant.
-        """
-        if not self._ws_assistant:
-            ws = await self._connected_websocket_assistant()
-            self._ws_assistant = ws
-        return self._ws_assistant
 
     async def _place_order(
         self,
@@ -259,35 +258,28 @@ class ChangellyExchange(ExchangePyBase):
         # Construct the order request
         symbol = await self.exchange_symbol_associated_to_pair(trading_pair=trading_pair)
         side = "buy" if trade_type == TradeType.BUY else "sell"
-        order_request = {
-            "method": CONSTANTS.SPOT_NEW_ORDER,
-            "params": {
-                "client_order_id": order_id,
-                "symbol": symbol,
-                "side": side,
-                "quantity": f"{amount:f}",
-                "price": f"{price:f}",
-            },
-            "id": self.ORDERS_STREAM_ID,
+        data = {
+            "client_order_id": order_id,
+            "symbol": symbol,
+            "side": side,
+            "quantity": f"{amount:f}",
+            "price": f"{price:f}",
         }
+
         try:
-            ws_assistant = await self._connected_websocket_assistant()
-            await ws_assistant.send(WSJSONRequest(payload=order_request))
-            response = await ws_assistant.receive()
-            data = response.data
-            # log data recevied from WS
-            if "error" in data:
-                raise Exception(f"Error placing order: {data['error']}")
+            response = await self._api_post(
+                path_url=CONSTANTS.ORDER,
+                is_auth_required=True,
+                data=data,
+            )
+            
+            if not response:
+                raise Exception(f"Error placing order")
         except Exception as e:
             self.logger().error(f"Error placing order: {str(e)}", exc_info=True)
             time.sleep(5.0)
             raise e
         return (order_id, time.time())
-
-    # async def _get_spot_fees(self):
-    #     ws: WSAssistant = await self._connected_websocket_assistant()
-    #     fees_request_payload = {"method": CONSTANTS.SPOT_FEES, "params": {}, "id": self.ORDERS_STREAM_ID}
-    #     await ws.send(WSJSONRequest(payload=fees_request_payload))
 
     def _get_fee(
         self,
@@ -315,26 +307,19 @@ class ChangellyExchange(ExchangePyBase):
     async def _place_cancel(self, order_id: str, tracked_order: InFlightOrder) -> bool:
         # Construct the order cancellation message and send via websocket
         try:
-            cancel_payload = {
-                "method": CONSTANTS.SPOT_CANCEL_ORDER,
-                "params": {"client_order_id": order_id},
-                "id": self.ORDERS_STREAM_ID,
-            }
+            paht_url = f"{CONSTANTS.ORDER}/{order_id}"
             self.logger().info(f"Canceling order {order_id}...")
-            ws_assistant = await self._connected_websocket_assistant()
-            await ws_assistant.send(WSJSONRequest(payload=cancel_payload))
-            message = await ws_assistant.receive()
-            data = message.data
-            if "result" in data:
-                result = data["result"]
-                if "status" in result and result["status"] == "canceled":
-                    return True
-            return False
+            response = await self._api_delete(
+                path_url=paht_url,
+                is_auth_required=True,
+                limit_id=CONSTANTS.ORDER,
+            )
+            if not response or "status" not in response or response["status"] != "canceled":
+                return False
+            return True
         except Exception as e:
             self.logger().error(f"Error canceling order: {str(e)}", exc_info=True)
             time.sleep(5.0)
-            # try reconnect
-            
             return False
         
     def _is_order_not_found_during_status_update_error(self, status_update_exception: Exception) -> bool:
@@ -356,10 +341,11 @@ class ChangellyExchange(ExchangePyBase):
     async def _update_trading_fees(self):
         try:
             fees_payload = {"method": CONSTANTS.SPOT_FEES, "params": {}, "id": self.ORDERS_STREAM_ID}
-            ws: WSAssistant = await self._connected_websocket_assistant()
+            ws: WSAssistant = await self._connected_websocket_assistant('trading_fees')
 
             await ws.send(WSJSONRequest(payload=fees_payload))
-            fees_response = await ws.receive()
+            async with self._ws_lock:
+                fees_response = await ws.receive()
             data = fees_response.data
             if not data or "result" not in data:
                 self.logger().info(f"Error updating trading fees")
@@ -490,31 +476,30 @@ class ChangellyExchange(ExchangePyBase):
 
     async def _update_balances(self):
         try:
-            ws: WSAssistant = await self._connected_websocket_assistant()
-
-            balance_payload = {"method": CONSTANTS.SPOT_BALANCES, "params": {}, "id": self.ORDERS_STREAM_ID}
-            await ws.send(WSJSONRequest(payload=balance_payload))
-            balance_response = await ws.receive()
-            data = balance_response.data
+            balances = await self._api_get(
+                path_url=CONSTANTS.BALANCE,
+                is_auth_required=True,
+            )
             # Assuming balance_response is structured with balance details
-            if not data or "result" not in data:
-                self.logger().info(f"Error updating balances: {data}")
+            if not balances:
+                self.logger().info(f"Error updating balances: {balances}")
                 return
-
-            for balance in data["result"]:
+            for balance in balances:
                 currency = balance["currency"]
                 self._account_balances[currency] = Decimal(balance["available"])
                 self._account_available_balances[currency] = Decimal(balance["available"])
         except Exception as e:
             self.logger().error(f"Error updating balances: {str(e)}", exc_info=True)
+        
 
     async def _get_active_orders(self):
         try:
-            ws: WSAssistant = await self._connected_websocket_assistant()
+            ws: WSAssistant = await self._connected_websocket_assistant('orders')
             active_orders_payload = {"method": CONSTANTS.SPOT_GET_ORDERS, "params": {}, "id": self.ORDERS_STREAM_ID}
             # Get active orders
             await ws.send(WSJSONRequest(payload=active_orders_payload))
-            active_orders_response = await ws.receive()
+            async with self._ws_lock:
+                active_orders_response = await ws.receive()
             data = active_orders_response.data
             if not data or "result" not in data:
                 return []
