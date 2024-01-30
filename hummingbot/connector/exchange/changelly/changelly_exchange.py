@@ -199,8 +199,8 @@ class ChangellyExchange(ExchangePyBase):
         not ready it returns False.
         """
         ready = all(self.status_dict.values())
-        if not ready:
-            self.logger().info(f"Connector not ready. Status: {self.status_dict}")
+        # if not ready:
+        #     self.logger().info(f"Connector not ready. Status: {self.status_dict}")
         return ready
     
 
@@ -272,14 +272,14 @@ class ChangellyExchange(ExchangePyBase):
                 is_auth_required=True,
                 data=data,
             )
+            if response and "status" in response:
+                return (order_id, time.time())
+            else:
+                raise Exception(f"Error placing order: {response}")
             
-            if not response:
-                raise Exception(f"Error placing order")
         except Exception as e:
             self.logger().error(f"Error placing order: {str(e)}", exc_info=True)
-            time.sleep(5.0)
             raise e
-        return (order_id, time.time())
 
     def _get_fee(
         self,
