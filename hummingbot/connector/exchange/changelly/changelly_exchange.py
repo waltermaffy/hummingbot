@@ -264,6 +264,7 @@ class ChangellyExchange(ExchangePyBase):
             "side": side,
             "quantity": f"{amount:f}",
             "price": f"{price:f}",
+            "post_only": order_type is OrderType.LIMIT_MAKER,
         }
 
         try:
