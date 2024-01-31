@@ -102,7 +102,7 @@ TIME_IN_FORCE_FOK = "FOK"  # Fill or kill
 
 MAX_REQUEST_LOGIN = 5
 MAX_REQUEST_SPOT_BALANCE = 30
-MAX_REQUEST_ORDERS = 500
+MAX_REQUEST_ORDERS = 300
 MAX_REQUEST_WALLET = 15
 
 REQUEST_WEIGHT = "REQUEST_WEIGHT"
@@ -125,7 +125,7 @@ RATE_LIMITS = [
     ),
     RateLimit(
         limit_id=SPOT_ORDER_URL,
-        limit=MAX_REQUEST,
+        limit=MAX_REQUEST_ORDERS,
         time_interval=ONE_MINUTE,
         linked_limits=[LinkedLimitWeightPair(REQUEST_WEIGHT, 20), LinkedLimitWeightPair(RAW_REQUESTS, 30)],
     ),
@@ -143,9 +143,9 @@ RATE_LIMITS = [
     ),
     RateLimit(
         limit_id=ORDER,
-        limit=MAX_REQUEST,
+        limit=MAX_REQUEST_ORDERS,
         time_interval=ONE_MINUTE,
-        linked_limits=[LinkedLimitWeightPair(REQUEST_WEIGHT, 20), LinkedLimitWeightPair(RAW_REQUESTS, 30)],
+        linked_limits=[LinkedLimitWeightPair(REQUEST_WEIGHT, 300), LinkedLimitWeightPair(RAW_REQUESTS, 450)],
     ),
     # Pools
     RateLimit(limit_id=LOGIN, limit=MAX_REQUEST_LOGIN, time_interval=ONE_SECOND),
