@@ -495,16 +495,13 @@ class ChangellyExchange(ExchangePyBase):
 
     async def _get_active_orders(self):
         try:
-            ws: WSAssistant = await self._connected_websocket_assistant('orders')
-            active_orders_payload = {"method": CONSTANTS.SPOT_GET_ORDERS, "params": {}, "id": self.ORDERS_STREAM_ID}
-            # Get active orders
-            await ws.send(WSJSONRequest(payload=active_orders_payload))
-            async with self._ws_lock:
-                active_orders_response = await ws.receive()
-            data = active_orders_response.data
-            if not data or "result" not in data:
+            response = await self._api_get(
+                path_url=CONSTANTS.ORDER,
+                is_auth_required=True
+            )
+            if not response or len(response) == 0:
                 return []
-            return data["result"]
+            return response   
         except Exception as e:
             self.logger().error(f"Error getting active orders: {str(e)}", exc_info=True)
             return []
