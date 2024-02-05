@@ -487,8 +487,10 @@ class ChangellyExchange(ExchangePyBase):
                 return
             for balance in balances:
                 currency = balance["currency"]
-                self._account_balances[currency] = Decimal(balance["available"])
-                self._account_available_balances[currency] = Decimal(balance["available"])
+                reserved_balance = Decimal(balance["reserved"])
+                available_balance = Decimal(balance["available"])
+                self._account_balances[currency] = reserved_balance + available_balance
+                self._account_available_balances[currency] = available_balance
         except Exception as e:
             self.logger().error(f"Error updating balances: {str(e)}", exc_info=True)
         
