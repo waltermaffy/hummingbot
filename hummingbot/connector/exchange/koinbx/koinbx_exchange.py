@@ -24,6 +24,7 @@ from hummingbot.core.network_iterator import NetworkStatus
 from hummingbot.core.utils.async_utils import safe_ensure_future, safe_gather
 from hummingbot.core.web_assistant.connections.data_types import RESTMethod
 from hummingbot.core.web_assistant.web_assistants_factory import WebAssistantsFactory
+import time 
 
 s_decimal_0 = Decimal(0)
 s_decimal_NaN = Decimal("nan")
@@ -183,7 +184,7 @@ class KoinbxExchange(ExchangePyBase):
             "timestamp": str(int(self._time_synchronizer.time() * 1000)),
         }
         response = await self._api_post(path_url=CONSTANTS.ORDER_PATH_URL, data=data, is_auth_required=True)
-        self.logger().info(f"Placed order on {self.name}. - {response=}")
+        self.logger().debug(f"Placed order on {self.name}. - {response=}")
         if not response:
             self.logger().error(f"Failed to place order on {self.name}. - {response=}")
             raise ValueError(f"Failed to place order on {self.name}. - {response=}")
@@ -199,14 +200,13 @@ class KoinbxExchange(ExchangePyBase):
         Cancels an order on the exchange.
         """
         data = {"orderId": tracked_order.exchange_order_id, "timestamp": str(int(self._time_synchronizer.time() * 1000))}
-        self.logger().info(f"Cancelling order {order_id} on {self.name} - {data=}")
+        self.logger().debug(f"Cancelling order {order_id} on {self.name} - {data=}")
         response = await self._api_post(path_url=CONSTANTS.CANCEL_ORDER_PATH_URL, data=data, is_auth_required=True)
-        self.logger().info(f"Cancelled order on {self.name}. - {response=}")
-        # if not response.get("status"):
-            # TODO: An order already does not mean its not cancelled, need to check the status
-            # Check if order already executed
-            # if response.get("message") == "Order already executed":
-            #     return True
+        self.logger().debug(f"Cancelled order on {self.name}. - {response=}")
+        if not response.get("status"):
+            # Check if order already cancelled
+            if response.get("message") == "Order already cancelled":
+                return True
         return response["status"]
 
     async def _format_trading_rules(self, exchange_info_dict: Dict[str, Any]) -> List[TradingRule]:
@@ -279,38 +279,98 @@ class KoinbxExchange(ExchangePyBase):
             await self._process_open_orders_event(event["open_orders"])
         if "balance" in event:
             self._process_balance_event(event["balance"])
+        if "completed_orders" in event:
+            await self._process_completed_orders(event["completed_orders"])
+
+    async def _process_completed_orders(self, completed_orders: List[Dict[str, Any]]):
+        """
+        Process completed orders update from the user stream.
+        """
+        for order_data in completed_orders:
+            exchange_order_id = str(order_data.get("orderId"))
+            if exchange_order_id is None:
+                continue
+            tracked_order = self._order_tracker.all_updatable_orders_by_exchange_order_id.get(exchange_order_id)
+            if tracked_order is None:
+                continue
+            
+            self.logger().debug(f"Processing Completed Order Update: {order_data}")
+            # Update order state
+            order_update = OrderUpdate(
+                client_order_id=tracked_order.client_order_id,
+                exchange_order_id=exchange_order_id,
+                trading_pair=tracked_order.trading_pair,
+                update_timestamp=int(time.time()),
+                new_state=self._get_order_state(order_data),
+            )
+            self._order_tracker.process_order_update(order_update)
+
+            # Create TradeUpdate if the order is filled
+            if order_update.new_state == OrderState.FILLED:
+                trade_update = TradeUpdate(
+                    trade_id=str(order_data.get("orderId")),
+                    client_order_id=tracked_order.client_order_id,
+                    exchange_order_id=exchange_order_id,
+                    trading_pair=tracked_order.trading_pair,
+                    fill_price=Decimal(str(order_data.get("price"))),
+                    fill_base_amount=Decimal(str(order_data.get("filledAmount"))),
+                    fill_quote_amount=Decimal(str(order_data.get("filledPrice"))),
+                    fee=TradeFeeBase.new_spot_fee(
+                        fee_schema=self.trade_fee_schema(),
+                        trade_type=TradeType.BUY if order_data["orderType"].lower() == "buy" else TradeType.SELL,
+                        percent_token="",  # Update with actual token if available
+                        flat_fees=[],  # Include fee details if available
+                    ),
+                    fill_timestamp=int(datetime.strptime(order_data["tradeTime"], "%Y-%m-%d %H:%M:%S").timestamp()),
+                )
+                self._order_tracker.process_trade_update(trade_update)
 
     async def _process_open_orders_event(self, open_orders: List[Dict[str, Any]]):
         """
         Process open orders update from the user stream.
         """
         for order_data in open_orders:
-            client_order_id = order_data.get("clientOrderId")
-            if client_order_id is None:
+            exchange_order_id = str(order_data.get("orderId"))
+            if exchange_order_id is None:
                 continue
-            tracked_order = self._order_tracker.all_updatable_orders.get(client_order_id)
-            if tracked_order is None:
-                continue
+            
+            tracked_order = self._order_tracker.all_updatable_orders_by_exchange_order_id.get(exchange_order_id)
 
+            if tracked_order is None:
+                # self.logger().warning(
+                #     f"Could not find tracked order for open order event {exchange_order_id}. Skipping."
+                # )
+                continue
+            
             order_update = OrderUpdate(
-                client_order_id=client_order_id,
-                exchange_order_id=order_data["orderId"],
+                client_order_id=tracked_order.client_order_id,
+                exchange_order_id=tracked_order.exchange_order_id,
                 trading_pair=tracked_order.trading_pair,
-                update_timestamp=int(order_data["time"]),
+                update_timestamp=int(self._time_synchronizer.time()),
                 new_state=self._get_order_state(order_data),
             )
+            self.logger().debug(f"Processing Open Order Update: {order_update}")
             self._order_tracker.process_order_update(order_update)
 
     def _get_order_state(self, order_data: Dict[str, Any]) -> OrderState:
         """
         Determine the order state based on the order data.
         """
-        status = order_data["status"].lower()
+        status = order_data.get("status", "").lower()
         if status == "cancelled":
             return OrderState.CANCELED
-        elif Decimal(str(order_data["filledamount"])) >= Decimal(str(order_data["amount"])):
+        elif "filledAmount" in order_data and "askAmount" in order_data:
+            filled_amount = Decimal(str(order_data["filledAmount"]))
+            total_amount = Decimal(str(order_data["askAmount"]))
+        elif "filledamount" in order_data and "amount" in order_data:
+            filled_amount = Decimal(str(order_data["filledamount"]))
+            total_amount = Decimal(str(order_data["amount"]))
+        else:
+            return OrderState.OPEN  # Default to OPEN if data is missing
+
+        if filled_amount >= total_amount:
             return OrderState.FILLED
-        elif Decimal(str(order_data["filledamount"])) > Decimal("0"):
+        elif filled_amount > Decimal("0"):
             return OrderState.PARTIALLY_FILLED
         else:
             return OrderState.OPEN
@@ -330,12 +390,13 @@ class KoinbxExchange(ExchangePyBase):
         """
         Fetches all trade updates for a given order using the getOrder API.
         """
+        self.logger().debug(f"Fetching all trade updates for order {order.client_order_id}")
         data = {
             "orderId": order.exchange_order_id,
             "timestamp": str(int(self._time_synchronizer.time() * 1000)),
         }
         response = await self._api_post(path_url=CONSTANTS.GET_ORDER_PATH_URL, data=data, is_auth_required=True)
-        self.logger().info(f"KOINBX Order update: {response}")
+        self.logger().debug(f"KOINBX Order update: {response}")
         
         trade_updates = []
         if response["status"] and response["data"]["data"]:
@@ -373,7 +434,7 @@ class KoinbxExchange(ExchangePyBase):
             "timestamp": str(int(self._time_synchronizer.time() * 1000)),
         }
         response = await self._api_post(path_url=CONSTANTS.GET_ORDER_PATH_URL, data=data, is_auth_required=True)
-        self.logger().info(f"KOINBX Order update: {response}")
+        self.logger().debug(f"KOINBX Order update: {response}")
         order_data = response["data"]["data"][0]
         new_state = OrderState.OPEN
         if order_data["status"] == "cancelled":
@@ -425,7 +486,7 @@ class KoinbxExchange(ExchangePyBase):
             self._account_available_balances[asset_name] = (
                 Decimal(balance_entry["balance"]) - Decimal(balance_entry["locked_amount"])
             )
-            
+
     def _initialize_trading_pair_symbols_from_exchange_info(self, exchange_info: Dict[str, Any]):
         mapping = bidict()
 

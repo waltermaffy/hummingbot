@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 class KoinbxAPIOrderBookDataSource(OrderBookTrackerDataSource):
     MESSAGE_TIMEOUT = 30.0
     PING_TIMEOUT = 10.0
-    POLLING_INTERVAL = 5.0
+    POLLING_INTERVAL = 2.0
 
     _logger: Optional[HummingbotLogger] = None
     _trading_pair_symbol_map: Dict[str, Mapping[str, str]] = {}
@@ -51,7 +51,7 @@ class KoinbxAPIOrderBookDataSource(OrderBookTrackerDataSource):
     async def _request_order_book_snapshot(self, trading_pair: str) -> Dict[str, Any]:
         exchange_symbol = await self._connector.exchange_symbol_associated_to_pair(trading_pair=trading_pair)
         params = {"market_pair": exchange_symbol}
-        
+        # TODO: Check if we need to put also the depth of the order book
         rest_assistant = await self._api_factory.get_rest_assistant()
         data = await rest_assistant.execute_request(
             url=web_utils.public_rest_url(path_url=CONSTANTS.ORDERBOOK_PATH_URL, domain=self._domain),

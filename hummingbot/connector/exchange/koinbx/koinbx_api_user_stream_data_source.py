@@ -20,7 +20,8 @@ if TYPE_CHECKING:
 class KoinbxAPIUserStreamDataSource(UserStreamTrackerDataSource):
     LISTEN_KEY_KEEP_ALIVE_INTERVAL = 1800  # Recommended to Ping/Update listen key to keep connection alive
     HEARTBEAT_TIME_INTERVAL = 30.0
-    POLL_INTERVAL = .5  
+    POLL_INTERVAL = 1  
+    ORDER_PAGE_LIMIT = 100000
     web_utils = web_utils
 
     _logger: Optional[HummingbotLogger] = None
@@ -74,10 +75,13 @@ class KoinbxAPIUserStreamDataSource(UserStreamTrackerDataSource):
 
         try:
             open_orders = await self._get_open_orders()
+            # Warn: an order could be both in open and completed orders
+            completed_orders = await self._get_completed_orders()
             balance = await self._get_balance()
 
             user_stream_data = {
                 "open_orders": open_orders,
+                "completed_orders": completed_orders,
                 "balance": balance,
                 "timestamp": current_timestamp
             }
@@ -89,47 +93,55 @@ class KoinbxAPIUserStreamDataSource(UserStreamTrackerDataSource):
 
     async def _get_open_orders(self) -> List[Dict[str, Any]]:
         """
-        Fetches open orders from the exchange by making two requests:
-        one for buy orders and one for sell orders.
+        Fetches open orders from the exchange.
         """
         rest_assistant = await self._api_factory.get_rest_assistant()
         url = web_utils.private_rest_url(CONSTANTS.OPEN_ORDERS_PATH_URL)
 
-        # Define the request data for buy and sell orders
-        data_buy = {
+        data = {
             "pageNumber": 1,
-            "pageLimit": 100,  # Adjust as needed
-            "type": "buy",
+            "pageLimit": self.ORDER_PAGE_LIMIT,
             "timestamp": str(int(time.time()))
         }
 
-        data_sell = {
-            "pageNumber": 1,
-            "pageLimit": 100,  # Adjust as needed
-            "type": "sell",
-            "timestamp": str(int(time.time()))
-        }
-
-        async def fetch_orders(data):
-            response = await rest_assistant.execute_request(
-                url=url,
-                data=data,
-                method=RESTMethod.POST,
-                is_auth_required=True,
-                throttler_limit_id=CONSTANTS.OPEN_ORDERS_PATH_URL
-            )
-            return response["data"]["data"]
-
-        # Fetch buy and sell orders concurrently
-        orders_buy, orders_sell = await asyncio.gather(
-            fetch_orders(data_buy),
-            fetch_orders(data_sell)
+        response = await rest_assistant.execute_request(
+            url=url,
+            data=data,
+            method=RESTMethod.POST,
+            is_auth_required=True,
+            throttler_limit_id=CONSTANTS.OPEN_ORDERS_PATH_URL
         )
+        if not response:
+            self.logger().error("Failed to fetch open orders. Retrying...")
+        if response["data"]["data"] is None:
+            return []
+        return response["data"]["data"]  
+    
+    async def _get_completed_orders(self) -> List[Dict[str, Any]]:
+        """
+        Fetches completed orders from the exchange.
+        """
+        rest_assistant = await self._api_factory.get_rest_assistant()
+        url = web_utils.private_rest_url(CONSTANTS.COMPLETED_ORDERS_PATH_URL)
 
-        # Combine the orders into a single list
-        open_orders = orders_buy + orders_sell
-
-        return open_orders
+        # Define the request data for buy and sell orders
+        data = {
+            "pageNumber": 1,
+            "pageLimit": self.ORDER_PAGE_LIMIT,
+            "timestamp": str(int(time.time()))
+        }
+        response = await rest_assistant.execute_request(
+            url=url,
+            data=data,
+            method=RESTMethod.POST,
+            is_auth_required=True,
+            throttler_limit_id=CONSTANTS.COMPLETED_ORDERS_PATH_URL
+        )
+        if not response:
+            self.logger().error("Failed to fetch comleted orders. Retrying...")
+        if response["data"]["data"] is None:
+            return []
+        return response["data"]["data"]  
 
     async def _get_balance(self) -> List[Dict[str, Any]]:
         """
