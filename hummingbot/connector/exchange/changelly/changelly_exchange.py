@@ -170,7 +170,7 @@ class ChangellyExchange(ExchangePyBase):
         raise NotImplementedError
 
     def _create_web_assistants_factory(self) -> WebAssistantsFactory:
-        return web_utils.build_api_factory(
+                return web_utils.build_api_factory(
             throttler=self._throttler, time_synchronizer=self._time_synchronizer, auth=self.authenticator
         )
 

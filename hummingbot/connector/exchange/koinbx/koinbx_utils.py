@@ -1,3 +1,4 @@
+import datetime
 from decimal import Decimal
 from typing import Any, Dict, Optional
 
@@ -40,6 +41,9 @@ def is_exchange_information_valid(trading_pair: Dict[str, Any]) -> bool:
     :return: True if the trading pair is enabled, False otherwise
     """
     return trading_pair.get("isFrozen", 0) == 0
+
+def convert_iso_date_to_timestamp(iso_date: str) -> float:
+    return datetime.datetime.strptime(iso_date, "%Y-%m-%dT%H:%M:%S.%fZ").timestamp()
 
 
 class KoinbxConfigMap(BaseConnectorConfigMap):

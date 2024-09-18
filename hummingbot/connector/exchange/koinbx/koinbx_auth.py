@@ -1,6 +1,7 @@
 import hashlib
 import hmac
 import json
+import time
 
 from hummingbot.connector.time_synchronizer import TimeSynchronizer
 from hummingbot.core.web_assistant.auth import AuthBase
@@ -17,14 +18,19 @@ class KoinbxAuth(AuthBase):
         """
         Adds the authentication headers to the request, required for authenticated interactions.
         """
-        if request.data is not None:
-            payload = json.dumps(request.data)
+        if request.data is None:
+            data = {}
+        elif isinstance(request.data, dict):   
+            data = request.data
         else:
-            payload = ""
-
+            data = json.loads(request.data)
+        
+        payload = json.dumps(data, separators=(',', ':'))
+        
         signature = self._generate_signature(payload)
 
         headers = {
+            'Content-Type': 'application/json',
             "X-AUTH-APIKEY": self.api_key,
             "X-AUTH-SIGNATURE": signature,
         }

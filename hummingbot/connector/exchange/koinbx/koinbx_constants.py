@@ -4,7 +4,7 @@ from hummingbot.core.data_type.in_flight_order import OrderState
 HBOT_ORDER_ID_PREFIX = "x-XEKWYICX"
 MAX_ORDER_ID_LEN = 32
 
-TEST_PAIR = "T20_USDT"
+TEST_PAIR = "ORBS_USDT"
 TEST_MODE = True
 DEFAULT_FEE = 0.0025
 # Base URLs
@@ -57,7 +57,6 @@ ONE_DAY = 86400
 REQUEST_WEIGHT = "REQUEST_WEIGHT"
 RAW_REQUESTS = "RAW_REQUESTS"
 
-
 RATE_LIMITS = [
     RateLimit(limit_id="default", limit=30, time_interval=1),
     # Weighted Limits
@@ -65,76 +64,88 @@ RATE_LIMITS = [
         limit_id=PING_PATH_URL,
         limit=MAX_REQUEST,
         time_interval=ONE_MINUTE,
-        linked_limits=[LinkedLimitWeightPair(REQUEST_WEIGHT, 2), LinkedLimitWeightPair(RAW_REQUESTS, 1)],
+        linked_limits=[LinkedLimitWeightPair(REQUEST_WEIGHT, 20), LinkedLimitWeightPair(RAW_REQUESTS, 30)],
     ),
     RateLimit(
         limit_id=MAKETS_PATH_URL,
         limit=MAX_REQUEST,
         time_interval=ONE_MINUTE,
-        linked_limits=[LinkedLimitWeightPair(REQUEST_WEIGHT, 2), LinkedLimitWeightPair(RAW_REQUESTS, 1)],
+        linked_limits=[LinkedLimitWeightPair(REQUEST_WEIGHT, 20), LinkedLimitWeightPair(RAW_REQUESTS, 30)],
     ),
     RateLimit(
         limit_id=ORDERBOOK_PATH_URL,
         limit=MAX_REQUEST,
         time_interval=ONE_MINUTE,
-        linked_limits=[LinkedLimitWeightPair(REQUEST_WEIGHT, 2), LinkedLimitWeightPair(RAW_REQUESTS, 1)],
+        linked_limits=[LinkedLimitWeightPair(REQUEST_WEIGHT, 20), LinkedLimitWeightPair(RAW_REQUESTS, 30)],
     ),
     RateLimit(
         limit_id=TRADES_PATH_URL,
         limit=MAX_REQUEST,
         time_interval=ONE_MINUTE,
-        linked_limits=[LinkedLimitWeightPair(REQUEST_WEIGHT, 2), LinkedLimitWeightPair(RAW_REQUESTS, 1)],
+        linked_limits=[LinkedLimitWeightPair(REQUEST_WEIGHT, 20), LinkedLimitWeightPair(RAW_REQUESTS, 30)],
     ),
     RateLimit(
         limit_id=BALANCE_PATH_URL,
         limit=MAX_REQUEST,
         time_interval=ONE_MINUTE,
-        linked_limits=[LinkedLimitWeightPair(REQUEST_WEIGHT, 2), LinkedLimitWeightPair(RAW_REQUESTS, 1)],
+        linked_limits=[LinkedLimitWeightPair(REQUEST_WEIGHT, 20), LinkedLimitWeightPair(RAW_REQUESTS, 30)],
     ),
     RateLimit(
         limit_id=ORDER_BOOK_PRIVATE_PATH_URL,
         limit=MAX_REQUEST,
         time_interval=ONE_MINUTE,
-        linked_limits=[LinkedLimitWeightPair(REQUEST_WEIGHT, 2), LinkedLimitWeightPair(RAW_REQUESTS, 1)],
+        linked_limits=[LinkedLimitWeightPair(REQUEST_WEIGHT, 20), LinkedLimitWeightPair(RAW_REQUESTS, 30)],
     ),
     RateLimit(
         limit_id=TRADE_HISTORY_PATH_URL,
         limit=MAX_REQUEST,
         time_interval=ONE_MINUTE,
-        linked_limits=[LinkedLimitWeightPair(REQUEST_WEIGHT, 2), LinkedLimitWeightPair(RAW_REQUESTS, 1)],
+        linked_limits=[LinkedLimitWeightPair(REQUEST_WEIGHT, 20), LinkedLimitWeightPair(RAW_REQUESTS, 30)],
     ),
     RateLimit(
         limit_id=GET_ORDER_PATH_URL,
         limit=MAX_REQUEST,
         time_interval=ONE_MINUTE,
-        linked_limits=[LinkedLimitWeightPair(REQUEST_WEIGHT, 2), LinkedLimitWeightPair(RAW_REQUESTS, 1)],
+        linked_limits=[LinkedLimitWeightPair(REQUEST_WEIGHT, 20), LinkedLimitWeightPair(RAW_REQUESTS, 30)],
     ),
     RateLimit(
         limit_id=ORDER_PATH_URL,
         limit=MAX_REQUEST,
         time_interval=ONE_MINUTE,
-        linked_limits=[LinkedLimitWeightPair(REQUEST_WEIGHT, 2), LinkedLimitWeightPair(RAW_REQUESTS, 1)],
+        linked_limits=[LinkedLimitWeightPair(REQUEST_WEIGHT, 20), LinkedLimitWeightPair(RAW_REQUESTS, 30)],
     ),
     RateLimit(
         limit_id=OPEN_ORDERS_PATH_URL,
         limit=MAX_REQUEST,
         time_interval=ONE_MINUTE,
-        linked_limits=[LinkedLimitWeightPair(REQUEST_WEIGHT, 2), LinkedLimitWeightPair(RAW_REQUESTS, 1)],
+        linked_limits=[LinkedLimitWeightPair(REQUEST_WEIGHT, 20), LinkedLimitWeightPair(RAW_REQUESTS, 30)],
     ),
     RateLimit(
         limit_id=COMPLETED_ORDERS_PATH_URL,
         limit=MAX_REQUEST,
         time_interval=ONE_MINUTE,
-        linked_limits=[LinkedLimitWeightPair(REQUEST_WEIGHT, 2), LinkedLimitWeightPair(RAW_REQUESTS, 1)],
+        linked_limits=[LinkedLimitWeightPair(REQUEST_WEIGHT, 20), LinkedLimitWeightPair(RAW_REQUESTS, 30)],
     ),
     RateLimit(
         limit_id=CANCEL_ORDER_PATH_URL,
         limit=MAX_REQUEST,
         time_interval=ONE_MINUTE,
-        linked_limits=[LinkedLimitWeightPair(REQUEST_WEIGHT, 2), LinkedLimitWeightPair(RAW_REQUESTS, 1)],
+        linked_limits=[LinkedLimitWeightPair(REQUEST_WEIGHT, 20), LinkedLimitWeightPair(RAW_REQUESTS, 30)],
+    ),
+    RateLimit(
+        limit_id=ASSET_PATH_URL,
+        limit=MAX_REQUEST,
+        time_interval=ONE_MINUTE,
+        linked_limits=[LinkedLimitWeightPair(REQUEST_WEIGHT, 20), LinkedLimitWeightPair(RAW_REQUESTS, 30)],
+    ),
+    RateLimit(
+        limit_id=TICKER_PATH_URL,
+        limit=MAX_REQUEST,
+        time_interval=ONE_MINUTE,
+        linked_limits=[LinkedLimitWeightPair(REQUEST_WEIGHT, 20), LinkedLimitWeightPair(RAW_REQUESTS, 30)],
     ),
 ]
-
+# RATE_LIMITS = []
 
 DIFF_EVENT_TYPE = "depthUpdate"
 TRADE_EVENT_TYPE = "trade"

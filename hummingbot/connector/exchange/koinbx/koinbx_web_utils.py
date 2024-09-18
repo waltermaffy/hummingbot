@@ -1,3 +1,5 @@
+import time
+from http import server
 from typing import Any, Callable, Dict, Optional
 
 from hummingbot.connector.exchange.koinbx import koinbx_constants as CONSTANTS
@@ -106,13 +108,14 @@ async def get_current_server_time(
     throttler: Optional[AsyncThrottler] = None,
     domain: str = CONSTANTS.DEFAULT_DOMAIN,
 ) -> float:
-    throttler = throttler or create_throttler()
-    api_factory = build_api_factory_without_time_synchronizer_pre_processor(throttler=throttler)
-    rest_assistant = await api_factory.get_rest_assistant()
-    response = await rest_assistant.execute_request(
-        url=public_rest_url(path_url=CONSTANTS.SERVER_TIME_PATH_URL, domain=domain),
-        method=RESTMethod.GET,
-        throttler_limit_id=CONSTANTS.SERVER_TIME_PATH_URL,
-    )
-    server_time = response["serverTime"]
+    # throttler = throttler or create_throttler()
+    # api_factory = build_api_factory_without_time_synchronizer_pre_processor(throttler=throttler)
+    # rest_assistant = await api_factory.get_rest_assistant()
+    # response = await rest_assistant.execute_request(
+    #     url=public_rest_url(path_url=CONSTANTS.SERVER_TIME_PATH_URL, domain=domain),
+    #     method=RESTMethod.GET,
+    #     throttler_limit_id=CONSTANTS.SERVER_TIME_PATH_URL,
+    # )
+    # server_time = response["serverTime"]
+    server_time = time.time()
     return server_time

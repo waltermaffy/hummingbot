@@ -21,6 +21,7 @@ from hummingbot.core.data_type.order_book_tracker_data_source import OrderBookTr
 from hummingbot.core.data_type.trade_fee import DeductedFromReturnsTradeFee, TokenAmount, TradeFeeBase
 from hummingbot.core.data_type.user_stream_tracker_data_source import UserStreamTrackerDataSource
 from hummingbot.core.network_iterator import NetworkStatus
+from hummingbot.core.utils.async_utils import safe_ensure_future, safe_gather
 from hummingbot.core.web_assistant.connections.data_types import RESTMethod
 from hummingbot.core.web_assistant.web_assistants_factory import WebAssistantsFactory
 
@@ -52,7 +53,11 @@ class KoinbxExchange(ExchangePyBase):
         self._trading_pairs = trading_pairs
         self._last_trades_poll_koinbx_timestamp = 1.0
         self.retry_left = CONSTANTS.MAX_RETRIES
+        self.real_time_balance_update = False
+
         super().__init__(client_config_map)
+        self._api_factory = self._create_web_assistants_factory()
+        self._ws_lock = asyncio.Lock()
 
     @property
     def name(self) -> str:
@@ -101,41 +106,6 @@ class KoinbxExchange(ExchangePyBase):
     @property
     def is_trading_required(self) -> bool:
         return self._trading_required
-
-    async def check_network(self) -> NetworkStatus:
-        """
-        This function is required by NetworkIterator base class and is called periodically to check
-        the network connection. Ping the network (or call any lightweight public API).
-        """
-        try:
-            self.logger().debug(f"Checking network status of {self.name}...")
-            rest_assistant = await self._api_factory.get_rest_assistant()
-            url = web_utils.public_rest_url(path=CONSTANTS.PING_PATH_URL, domain=self.domain)
-            result = await rest_assistant.execute_request(
-                url=url, method=RESTMethod.GET, throttler_limit_id=CONSTANTS.PING_PATH_URL
-            )
-            if not result:
-                self.logger().warning("KoinBX public API request failed. Please check network connection.")
-                self.logger().warning(f"Request: {url}")
-                return NetworkStatus.NOT_CONNECTED
-
-        except asyncio.CancelledError:
-            raise
-        except Exception as e:
-            self.logger().error(f"Unexpected error checking KoinBX network status. {e}", exc_info=True)
-            if self.retry_left > 0:
-                self.retry_left -= 1
-                sleep_time = CONSTANTS.RETRY_INTERVAL * (
-                    1 + CONSTANTS.EXPONENTIAL_BACKOFF * (CONSTANTS.MAX_RETRIES - self.retry_left)
-                )
-                self.logger().info(f"Retrying call GET to {url} in {sleep_time} seconds...")
-                self.logger().info(f"Retries left: {self.retry_left}")
-                await asyncio.sleep(sleep_time)
-                self._api_factory = self._create_web_assistants_factory()
-                await self.check_network()
-            return NetworkStatus.NOT_CONNECTED
-        self.retry_left = CONSTANTS.MAX_RETRIES
-        return NetworkStatus.CONNECTED
 
     def supported_order_types(self):
         return [OrderType.LIMIT, OrderType.LIMIT_MAKER, OrderType.MARKET]
@@ -186,7 +156,7 @@ class KoinbxExchange(ExchangePyBase):
 
     def _create_web_assistants_factory(self) -> WebAssistantsFactory:
         return web_utils.build_api_factory_without_time_synchronizer_pre_processor(
-            throttler=self._throttler, auth=self._auth
+            throttler=self._throttler, auth=self.authenticator
         )
 
     async def _place_order(
@@ -204,7 +174,6 @@ class KoinbxExchange(ExchangePyBase):
         """
         symbol = await self.exchange_symbol_associated_to_pair(trading_pair=trading_pair)
         side = "buy" if trade_type == TradeType.BUY else "sell"
-        # order_type_str = "limit" if order_type == OrderType.LIMIT else "market"
 
         data = {
             "quantity": str(amount),
@@ -213,18 +182,31 @@ class KoinbxExchange(ExchangePyBase):
             "type": side,
             "timestamp": str(int(self._time_synchronizer.time() * 1000)),
         }
-        url = web_utils.private_rest_url(CONSTANTS.ORDER_PATH_URL)
-        response = await self._api_post(path_url=url, data=data, is_auth_required=True)
-
-        return str(response["data"]["orderId"]), self._time_synchronizer.time()
+        response = await self._api_post(path_url=CONSTANTS.ORDER_PATH_URL, data=data, is_auth_required=True)
+        self.logger().info(f"Placed order on {self.name}. - {response=}")
+        if not response:
+            self.logger().error(f"Failed to place order on {self.name}. - {response=}")
+            raise ValueError(f"Failed to place order on {self.name}. - {response=}")
+        order_id = response.get("data", {}).get("orderId")
+        if order_id is None:
+            self.logger().error(f"Failed to place order on {self.name}. - {response=}")
+            raise ValueError(f"Failed to place order on {self.name}. - {response=}")
+        
+        return str(order_id), self._time_synchronizer.time()
 
     async def _place_cancel(self, order_id: str, tracked_order: InFlightOrder):
         """
         Cancels an order on the exchange.
         """
-        url = web_utils.private_rest_url(CONSTANTS.CANCEL_ORDER_PATH_URL)
-        data = {"orderId": order_id, "timestamp": str(int(self._time_synchronizer.time() * 1000))}
-        response = await self._api_post(path_url=url, data=data, is_auth_required=True)
+        data = {"orderId": tracked_order.exchange_order_id, "timestamp": str(int(self._time_synchronizer.time() * 1000))}
+        self.logger().info(f"Cancelling order {order_id} on {self.name} - {data=}")
+        response = await self._api_post(path_url=CONSTANTS.CANCEL_ORDER_PATH_URL, data=data, is_auth_required=True)
+        self.logger().info(f"Cancelled order on {self.name}. - {response=}")
+        # if not response.get("status"):
+            # TODO: An order already does not mean its not cancelled, need to check the status
+            # Check if order already executed
+            # if response.get("message") == "Order already executed":
+            #     return True
         return response["status"]
 
     async def _format_trading_rules(self, exchange_info_dict: Dict[str, Any]) -> List[TradingRule]:
@@ -277,22 +259,61 @@ class KoinbxExchange(ExchangePyBase):
 
     async def _user_stream_event_listener(self):
         """
-        This functions runs in background continuously processing the events received from the exchange by the user
-        stream data source. It keeps reading events from the queue until the task is interrupted.
-        The events received are balance updates, order updates and trade events.
+        This function runs in the background continuously processing the events received from the exchange
+        by the user stream data source. It uses polling instead of websockets.
         """
         async for event_message in self._iter_user_event_queue():
             try:
-                event_type = event_message.get("e")
-                if event_type == "order":
-                    await self._process_order_message(event_message)
-                elif event_type == "balance":
-                    self._process_balance_message(event_message)
+                await self._process_user_stream_event(event_message)
             except asyncio.CancelledError:
                 raise
             except Exception:
-                self.logger().error("Unexpected error in user stream listener loop.", exc_info=True)
-                # await self._sleep(5.0)
+                self.logger().exception("Unexpected error in user stream listener loop.")
+                await asyncio.sleep(5.0)
+
+    async def _process_user_stream_event(self, event: Dict[str, Any]):
+        """
+        Process a user stream event received from the exchange.
+        """
+        if "open_orders" in event:
+            await self._process_open_orders_event(event["open_orders"])
+        if "balance" in event:
+            self._process_balance_event(event["balance"])
+
+    async def _process_open_orders_event(self, open_orders: List[Dict[str, Any]]):
+        """
+        Process open orders update from the user stream.
+        """
+        for order_data in open_orders:
+            client_order_id = order_data.get("clientOrderId")
+            if client_order_id is None:
+                continue
+            tracked_order = self._order_tracker.all_updatable_orders.get(client_order_id)
+            if tracked_order is None:
+                continue
+
+            order_update = OrderUpdate(
+                client_order_id=client_order_id,
+                exchange_order_id=order_data["orderId"],
+                trading_pair=tracked_order.trading_pair,
+                update_timestamp=int(order_data["time"]),
+                new_state=self._get_order_state(order_data),
+            )
+            self._order_tracker.process_order_update(order_update)
+
+    def _get_order_state(self, order_data: Dict[str, Any]) -> OrderState:
+        """
+        Determine the order state based on the order data.
+        """
+        status = order_data["status"].lower()
+        if status == "cancelled":
+            return OrderState.CANCELED
+        elif Decimal(str(order_data["filledamount"])) >= Decimal(str(order_data["amount"])):
+            return OrderState.FILLED
+        elif Decimal(str(order_data["filledamount"])) > Decimal("0"):
+            return OrderState.PARTIALLY_FILLED
+        else:
+            return OrderState.OPEN
 
     async def _update_order_fills_from_trades(self):
         """
@@ -307,35 +328,36 @@ class KoinbxExchange(ExchangePyBase):
 
     async def _all_trade_updates_for_order(self, order: InFlightOrder) -> List[TradeUpdate]:
         """
-        Fetches all trade updates for a given order.
+        Fetches all trade updates for a given order using the getOrder API.
         """
-        url = web_utils.private_rest_url(CONSTANTS.TRADE_HISTORY_PATH_URL)
         data = {
-            "pair_name": await self.exchange_symbol_associated_to_pair(order.trading_pair),
+            "orderId": order.exchange_order_id,
             "timestamp": str(int(self._time_synchronizer.time() * 1000)),
-            "pageNumber": 1,
-            "pageLimit": 100,  # Adjust as needed
         }
-        response = await self._api_post(path_url=url, data=data, is_auth_required=True)
-
+        response = await self._api_post(path_url=CONSTANTS.GET_ORDER_PATH_URL, data=data, is_auth_required=True)
+        self.logger().info(f"KOINBX Order update: {response}")
+        
         trade_updates = []
-        for trade in response["data"]["data"]:
-            if trade["_id"] == order.exchange_order_id:
+        if response["status"] and response["data"]["data"]:
+            order_data = response["data"]["data"][0]
+            
+            # Check if the order is filled or partially filled
+            if Decimal(str(order_data["filledamount"])) > Decimal("0"):
                 trade_update = TradeUpdate(
-                    trade_id=trade["_id"],
+                    trade_id=str(order_data["orderId"]),
                     client_order_id=order.client_order_id,
                     exchange_order_id=order.exchange_order_id,
                     trading_pair=order.trading_pair,
-                    fill_price=Decimal(str(trade["price"])),
-                    fill_base_amount=Decimal(str(trade["amount"])),
-                    fill_quote_amount=Decimal(str(trade["price"])) * Decimal(str(trade["amount"])),
+                    fill_price=Decimal(str(order_data["price"])),
+                    fill_base_amount=Decimal(str(order_data["filledamount"])),
+                    fill_quote_amount=Decimal(str(order_data["price"])) * Decimal(str(order_data["filledamount"])),
                     fee=TradeFeeBase.new_spot_fee(
                         fee_schema=self.trade_fee_schema(),
-                        trade_type=TradeType.BUY if trade["buy"] == "1" else TradeType.SELL,
+                        trade_type=TradeType.BUY if order_data["type"] == "buy" else TradeType.SELL,
                         percent_token="",
-                        flat_fees=[TokenAmount(amount=Decimal(str(trade.get("fee", "0"))), token="")],
+                        flat_fees=[],  # The API doesn't provide fee information, so we leave it empty
                     ),
-                    fill_timestamp=int(datetime.strptime(trade["datetime"], "%Y-%m-%d %H:%M:%S").timestamp()),
+                    fill_timestamp=int(datetime.strptime(order_data["createdAt"], "%Y-%m-%d %H:%M:%S").timestamp()),
                 )
                 trade_updates.append(trade_update)
 
@@ -345,13 +367,13 @@ class KoinbxExchange(ExchangePyBase):
         """
         Requests the status of an order from the exchange.
         """
-        url = web_utils.private_rest_url(CONSTANTS.GET_ORDER_PATH_URL)
+        # url = web_utils.private_rest_url(CONSTANTS.GET_ORDER_PATH_URL)
         data = {
             "orderId": tracked_order.exchange_order_id,
             "timestamp": str(int(self._time_synchronizer.time() * 1000)),
         }
-        response = await self._api_post(path_url=url, data=data, is_auth_required=True)
-
+        response = await self._api_post(path_url=CONSTANTS.GET_ORDER_PATH_URL, data=data, is_auth_required=True)
+        self.logger().info(f"KOINBX Order update: {response}")
         order_data = response["data"]["data"][0]
         new_state = OrderState.OPEN
         if order_data["status"] == "cancelled":
@@ -373,18 +395,37 @@ class KoinbxExchange(ExchangePyBase):
         """
         Fetches and updates the user's balances.
         """
-        url = web_utils.private_rest_url(CONSTANTS.BALANCE_PATH_URL)
+        local_asset_names = set(self._account_balances.keys())
+        remote_asset_names = set()
+
         data = {"timestamp": str(int(self._time_synchronizer.time() * 1000))}
-        response = await self._api_post(path_url=url, data=data, is_auth_required=True)
+        response = await self._api_post(path_url=CONSTANTS.BALANCE_PATH_URL, data=data, is_auth_required=True)
 
         self._account_available_balances.clear()
         self._account_balances.clear()
 
         for balance_entry in response["data"]:
             asset_name = balance_entry["currency"]
-            self._account_balances[asset_name] = Decimal(str(balance_entry["balance"]))
-            self._account_available_balances[asset_name] = Decimal(str(balance_entry["balance"]))
+            self._account_balances[asset_name] = Decimal(balance_entry["balance"])
+            self._account_available_balances[asset_name] = Decimal(balance_entry["balance"]) - Decimal(balance_entry["locked_amount"])
+            remote_asset_names.add(asset_name)
 
+        asset_names_to_remove = local_asset_names.difference(remote_asset_names)
+        for asset_name in asset_names_to_remove:
+            del self._account_available_balances[asset_name]
+            del self._account_balances[asset_name]
+
+    def _process_balance_event(self, balance_data: List[Dict[str, Any]]):
+        """
+        Process balance update from the user stream.
+        """
+        for balance_entry in balance_data:
+            asset_name = balance_entry["currency"]
+            self._account_balances[asset_name] = Decimal(balance_entry["balance"])
+            self._account_available_balances[asset_name] = (
+                Decimal(balance_entry["balance"]) - Decimal(balance_entry["locked_amount"])
+            )
+            
     def _initialize_trading_pair_symbols_from_exchange_info(self, exchange_info: Dict[str, Any]):
         mapping = bidict()
 
@@ -404,7 +445,7 @@ class KoinbxExchange(ExchangePyBase):
         Fetches the last traded price for a given trading pair.
         """
         symbol = await self.exchange_symbol_associated_to_pair(trading_pair=trading_pair)
-        url = web_utils.public_rest_url(CONSTANTS.TICKER_PATH_URL)
+        # url = web_utils.public_rest_url(public_rest_url=CONSTANTS.TICKER_PATH_URL)
         params = {"market_pair": symbol}
-        response = await self._api_get(path_url=url, params=params)
+        response = await self._api_get(path_url=CONSTANTS.TICKER_PATH_URL, params=params, is_auth_required=False)
         return float(response["tickers"][symbol]["last_price"])

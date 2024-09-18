@@ -20,11 +20,20 @@ class KoinbxOrderBook(OrderBook):
         """
         if metadata:
             msg.update(metadata)
-        return OrderBookMessage(
-            OrderBookMessageType.SNAPSHOT,
-            {"trading_pair": msg["trading_pair"], "update_id": timestamp, "bids": msg["bids"], "asks": msg["asks"]},
-            timestamp=timestamp,
-        )
+
+        data = msg.get('data', {})
+        bids = data.get('bids', [])
+        asks = data.get('asks', [])
+        update_id = data.get('timestamp', timestamp)
+        trading_pair = msg.get('trading_pair')
+        content = {
+            "trading_pair": trading_pair,
+            "update_id": update_id,
+            "bids": bids,
+            "asks": asks,
+        }
+
+        return OrderBookMessage(OrderBookMessageType.SNAPSHOT, content, timestamp)
 
     @classmethod
     def diff_message_from_exchange(
@@ -53,19 +62,28 @@ class KoinbxOrderBook(OrderBook):
         :param metadata: a dictionary with extra information to add to trade message
         :return: a trade message with the details of the trade as provided by the exchange
         """
-        # TODO: Implement this method with the private api
         if metadata:
             msg.update(metadata)
-        ts = msg["timestamp"]
-        return OrderBookMessage(
-            OrderBookMessageType.TRADE,
-            {
-                "trading_pair": msg["trading_pair"],
-                "trade_type": float(TradeType.BUY.value) if msg["type"] == "buy" else float(TradeType.SELL.value),
-                "trade_id": msg["trade_id"],
-                "update_id": ts,
-                "price": msg["price"],
-                "amount": msg["base_volume"],
-            },
-            timestamp=ts,
-        )
+        trade_id = msg.get('trade_id')
+        price = msg.get('price', 0)
+        amount = msg.get('amount', 0)
+        timestamp = msg.get('timestamp')
+        trading_pair = msg.get('trading_pair')
+
+        # Handle missing 'type' field
+        trade_type_str = msg.get('type')
+        if trade_type_str is None:
+            trade_type = TradeType.UNKNOWN
+        else:
+            trade_type = TradeType.BUY if trade_type_str.lower() == 'buy' else TradeType.SELL
+
+        content = {
+            "trade_id": trade_id,
+            "trading_pair": trading_pair,
+            "trade_type": float(trade_type.value),
+            "amount": float(amount),
+            "price": float(price),
+            "timestamp": timestamp,
+        }
+
+        return OrderBookMessage(OrderBookMessageType.TRADE, content, timestamp)
