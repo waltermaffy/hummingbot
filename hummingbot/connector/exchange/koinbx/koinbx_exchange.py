@@ -188,7 +188,11 @@ class KoinbxExchange(ExchangePyBase):
         if not response:
             self.logger().error(f"Failed to place order on {self.name}. - {response=}")
             raise ValueError(f"Failed to place order on {self.name}. - {response=}")
-        order_id = response.get("data", {}).get("orderId")
+        data = response.get("data", {})
+        if not data:
+            self.logger().error(f"Failed to place order on {self.name}. - {response=}")
+            raise ValueError(f"Failed to place order on {self.name}. - {response=}")
+        order_id = data.get("orderId")
         if order_id is None:
             self.logger().error(f"Failed to place order on {self.name}. - {response=}")
             raise ValueError(f"Failed to place order on {self.name}. - {response=}")
