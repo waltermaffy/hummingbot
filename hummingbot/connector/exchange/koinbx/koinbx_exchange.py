@@ -1,4 +1,5 @@
 import asyncio
+import time
 from datetime import datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
@@ -24,7 +25,6 @@ from hummingbot.core.network_iterator import NetworkStatus
 from hummingbot.core.utils.async_utils import safe_ensure_future, safe_gather
 from hummingbot.core.web_assistant.connections.data_types import RESTMethod
 from hummingbot.core.web_assistant.web_assistants_factory import WebAssistantsFactory
-import time 
 
 s_decimal_0 = Decimal(0)
 s_decimal_NaN = Decimal("nan")
