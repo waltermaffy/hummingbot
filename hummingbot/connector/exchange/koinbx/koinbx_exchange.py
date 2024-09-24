@@ -238,11 +238,11 @@ class KoinbxExchange(ExchangePyBase):
                 trading_rules.append(
                     TradingRule(
                         trading_pair=trading_pair,
-                        min_order_size=Decimal(pair_info["min_withdraw"]),
-                        min_price_increment=Decimal("1e-8"),  # Assuming 8 decimal places, adjust if needed
-                        min_base_amount_increment=Decimal("1e-8"),  # Assuming 8 decimal places, adjust if needed
+                        min_order_size=Decimal("1e-4"),
+                        min_price_increment=Decimal("1e-8"),
+                        min_base_amount_increment=Decimal("1e-8"),
                         min_notional_size=Decimal("0"),
-                        supports_market_orders=False,  # Assuming market orders are supported, adjust if needed
+                        supports_market_orders=False,
                     )
                 )
             except Exception:
