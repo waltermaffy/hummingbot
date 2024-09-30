@@ -471,8 +471,8 @@ class KoinbxExchange(ExchangePyBase):
 
         for balance_entry in response["data"]:
             asset_name = balance_entry["currency"]
-            self._account_balances[asset_name] = Decimal(balance_entry["balance"])
-            self._account_available_balances[asset_name] = Decimal(balance_entry["balance"]) - Decimal(balance_entry["locked_amount"])
+            self._account_balances[asset_name] = Decimal(balance_entry["balance"]) + Decimal(balance_entry["locked_amount"])
+            self._account_available_balances[asset_name] = Decimal(balance_entry["balance"]) 
             remote_asset_names.add(asset_name)
 
         asset_names_to_remove = local_asset_names.difference(remote_asset_names)
@@ -486,9 +486,9 @@ class KoinbxExchange(ExchangePyBase):
         """
         for balance_entry in balance_data:
             asset_name = balance_entry["currency"]
-            self._account_balances[asset_name] = Decimal(balance_entry["balance"])
+            self._account_balances[asset_name] = Decimal(balance_entry["balance"]) + Decimal(balance_entry["locked_amount"])
             self._account_available_balances[asset_name] = (
-                Decimal(balance_entry["balance"]) - Decimal(balance_entry["locked_amount"])
+                Decimal(balance_entry["balance"]) 
             )
 
     def _initialize_trading_pair_symbols_from_exchange_info(self, exchange_info: Dict[str, Any]):
