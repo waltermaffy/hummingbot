@@ -1,0 +1,13 @@
+strategy: null
+exchange: null
+trading_pair: null
+n_levels_bid: null
+n_levels_ask: null
+price_level_pct_step_bid: null
+price_level_pct_step_ask: null
+bid_size: null
+ask_size: null
+bid_spread: null
+ask_spread: null
+refresh_time: null
+
