@@ -29,19 +29,12 @@ class CoinstoreAPIOrderBookDataSource(OrderBookTrackerDataSource):
         self._connector = connector
         self._domain = domain
         self._api_factory = api_factory
+        self._trade_messages_queue_key = CONSTANTS.TRADE_EVENT_TYPE
+        self._diff_messages_queue_key = CONSTANTS.DIFF_EVENT_TYPE
+    
 
     async def get_last_traded_prices(self, trading_pairs: List[str], domain: Optional[str] = None) -> Dict[str, float]:
         return await self._connector.get_last_traded_prices(trading_pairs=trading_pairs)
-
-    async def _order_book_snapshot(self, trading_pair: str) -> OrderBookMessage:
-        snapshot_response: Dict[str, Any] = await self._request_order_book_snapshot(trading_pair)
-        snapshot_timestamp: float = time.time()
-        snapshot_msg: OrderBookMessage = CoinstoreOrderBook.snapshot_message_from_exchange(
-            snapshot_response,
-            snapshot_timestamp,
-            metadata={"trading_pair": trading_pair}
-        )
-        return snapshot_msg
 
     async def _request_order_book_snapshot(self, trading_pair: str) -> Dict[str, Any]:
         """
@@ -81,6 +74,31 @@ class CoinstoreAPIOrderBookDataSource(OrderBookTrackerDataSource):
         )
         message_queue.put_nowait(order_book_message)
 
+
+    async def _parse_order_book_snapshot_message(self, raw_message: Dict[str, Any], message_queue: asyncio.Queue):
+        """
+        Create an instance of OrderBookMessage of type OrderBookMessageType.SNAPSHOT
+
+        :param raw_message: the JSON dictionary of the public trade event
+        :param message_queue: queue where the parsed messages should be stored in
+        """
+        pass
+
+    async def _order_book_snapshot(self, trading_pair: str) -> OrderBookMessage:
+        snapshot_response: Dict[str, Any] = await self._request_order_book_snapshot(trading_pair)
+        snapshot_timestamp: float = time.time()
+        snapshot_msg: OrderBookMessage = CoinstoreOrderBook.snapshot_message_from_exchange(
+            snapshot_response,
+            snapshot_timestamp,
+            metadata={"trading_pair": trading_pair}
+        )
+        return snapshot_msg
+    
+    async def _connected_websocket_assistant(self) -> WSAssistant:
+        ws: WSAssistant = await self._api_factory.get_ws_assistant()
+        await ws.connect(ws_url=CONSTANTS.WSS_URL, ping_timeout=CONSTANTS.WS_HEARTBEAT_TIME_INTERVAL)
+        return ws
+    
     async def _subscribe_channels(self, ws: WSAssistant):
         """
         Subscribes to the trade events and diff orders events through the provided websocket connection.
@@ -115,7 +133,3 @@ class CoinstoreAPIOrderBookDataSource(OrderBookTrackerDataSource):
                        else self._trade_messages_queue_key)
         return channel
 
-    async def _connected_websocket_assistant(self) -> WSAssistant:
-        ws: WSAssistant = await self._api_factory.get_ws_assistant()
-        await ws.connect(ws_url=CONSTANTS.WSS_URL, ping_timeout=CONSTANTS.WS_HEARTBEAT_TIME_INTERVAL)
-        return ws

@@ -11,7 +11,9 @@ from hummingbot.connector.exchange.coinstore import (
     coinstore_web_utils as web_utils,
 )
 from hummingbot.connector.exchange.coinstore.coinstore_api_order_book_data_source import CoinstoreAPIOrderBookDataSource
-from hummingbot.connector.exchange.coinstore.coinstore_api_user_stream_data_source import CoinstoreAPIUserStreamDataSource
+from hummingbot.connector.exchange.coinstore.coinstore_api_user_stream_data_source import (
+    CoinstoreAPIUserStreamDataSource,
+)
 from hummingbot.connector.exchange.coinstore.coinstore_auth import CoinstoreAuth
 from hummingbot.connector.exchange_py_base import ExchangePyBase
 from hummingbot.connector.trading_rule import TradingRule
@@ -25,9 +27,15 @@ from hummingbot.core.event.events import MarketEvent, OrderFilledEvent
 from hummingbot.core.utils.async_utils import safe_gather
 from hummingbot.core.web_assistant.connections.data_types import RESTMethod
 from hummingbot.core.web_assistant.web_assistants_factory import WebAssistantsFactory
+import aiohttp
+from hummingbot.core.web_assistant.connections.data_types import RESTMethod, RESTRequest
+import json
 
 if TYPE_CHECKING:
     from hummingbot.client.config.config_helpers import ClientConfigAdapter
+
+s_decimal_NaN = Decimal("nan")
+s_decimal_0 = Decimal(0)
 
 
 class CoinstoreExchange(ExchangePyBase):
@@ -46,6 +54,7 @@ class CoinstoreExchange(ExchangePyBase):
         self._domain = domain    
         self._trading_required = trading_required
         self._trading_pairs = trading_pairs
+        self._http_client = aiohttp.ClientSession()
         super().__init__(client_config_map)
         
 
@@ -55,7 +64,7 @@ class CoinstoreExchange(ExchangePyBase):
     
     @property
     def authenticator(self) -> CoinstoreAuth:
-        return CoinstoreAuth(self.api_key, self.secret_key, time_provider=self._time_synchronizer)
+        return CoinstoreAuth(api_key=self.api_key, secret_key=self.secret_key, time_provider=self._time_synchronizer)
 
     @property
     def rate_limits_rules(self):
@@ -320,50 +329,134 @@ class CoinstoreExchange(ExchangePyBase):
         """
         pass
 
+    async def _make_trading_pairs_request(self) -> Any:
+        exchange_info = await self._api_post(path_url=self.trading_pairs_request_path, is_auth_required=True)
+        return exchange_info
+    
+    async def _api_request(
+            self,
+            path_url,
+            overwrite_url: Optional[str] = None,
+            method: RESTMethod = RESTMethod.GET,
+            params: Optional[Dict[str, Any]] = None,
+            data: Optional[Dict[str, Any]] = None,
+            is_auth_required: bool = False,
+            return_err: bool = False,
+            limit_id: Optional[str] = None,
+            headers: Optional[Dict[str, Any]] = None,
+            **kwargs,
+    ) -> Dict[str, Any]:
+        url = overwrite_url or await self._api_request_url(path_url=path_url, is_auth_required=is_auth_required)
+        self.logger().info(f"URL: {url} - headers: {headers} - params: {params} - data: {data} - method: {method} - is_auth_required: {is_auth_required} - return_err: {return_err} - limit_id: {limit_id}") 
+        
+        try:
+            headers = headers or {}
+            
+            local_headers = {
+            "Content-Type": ("application/json" if method != RESTMethod.GET else "application/x-www-form-urlencoded")}
 
-    from decimal import Decimal
+            local_headers.update(headers)
+
+            # data = json.dumps(data) if data is not None else data
+            payload = json.dumps(data or {})
+
+            request = RESTRequest(
+                method=method,
+                url=url,
+                params=params,
+                data=data,
+                headers=local_headers,
+                is_auth_required=is_auth_required,
+                throttler_limit_id=limit_id
+            )
+            if is_auth_required:
+                request = await self.authenticator.rest_authenticate(request)
+
+            async with aiohttp.ClientSession() as session:
+                if method == RESTMethod.POST:
+                    async with session.post(
+                        url=request.url,
+                        headers=request.headers,
+                        data=payload
+                    ) as response:
+                        # self.logger().info(f"Status: {response.status}")
+                        if response.status != 200:
+                            error_response = await response.text()
+                            self.logger().error(f"Error response: {error_response}")
+                            raise Exception(f"Error response: {error_response}")
+                        return await response.json()
+                elif method == RESTMethod.GET:
+                    async with session.get(
+                        url=request.url,
+                        headers=request.headers,
+                        data=payload
+                    ) as response:
+                        # self.logger().info(f"Status: {response.status}")
+                        if response.status != 200:
+                            error_response = await response.text()
+                            self.logger().error(f"Error response: {error_response}")
+                            raise Exception(f"Error response: {error_response}")
+                        return await response.json()
+
+        except IOError as request_exception:
+            last_exception = request_exception
+            if self._is_request_exception_related_to_time_synchronizer(request_exception=request_exception):
+                self._time_synchronizer.clear_time_offset_ms_samples()
+                await self._update_time_synchronizer()
+            else:
+                raise
 
     async def _update_balances(self):
         local_asset_names = set(self._account_balances.keys())
         remote_asset_names = set()
         self.logger().info("Updating balances...")
-        account_info = await self._api_post(
-            path_url=CONSTANTS.ACCOUNTS_PATH_URL,
-            is_auth_required=True
-        )
-        
-        balance_dict = {}
+        try:
+            account_info = await self._api_post(
+                path_url=CONSTANTS.ACCOUNTS_PATH_URL,
+                is_auth_required=True
+            )
+            # self.logger().info(f"Account info: {account_info}")
+            
+            if account_info.get("code") != 0:
+                self.logger().error(f"Error updating balances: {account_info.get('message')}")
+                return
 
-        for balance_entry in account_info["data"]:
-            asset_name = balance_entry["currency"]
-            balance_type = balance_entry["typeName"]
-            balance = Decimal(balance_entry["balance"])
+            balance_dict = {}
 
-            if asset_name not in balance_dict:
-                balance_dict[asset_name] = {"FROZEN": Decimal("0"), "AVAILABLE": Decimal("0")}
+            for balance_entry in account_info["data"]:
+                asset_name = balance_entry["currency"]
+                balance_type = balance_entry["typeName"]
+                balance = Decimal(balance_entry["balance"])
 
-            balance_dict[asset_name][balance_type] = balance
-        self.logger().info(f"Balance dict: {balance_dict}")
-        for asset_name, balances in balance_dict.items():
-            free_balance = balances["AVAILABLE"]
-            frozen_balance = balances["FROZEN"]
-            total_balance = free_balance + frozen_balance
+                if asset_name not in balance_dict:
+                    balance_dict[asset_name] = {"FROZEN": Decimal("0"), "AVAILABLE": Decimal("0")}
 
-            self._account_available_balances[asset_name] = free_balance
-            self._account_balances[asset_name] = total_balance
-            remote_asset_names.add(asset_name)
+                balance_dict[asset_name][balance_type] = balance
+            
+            # self.logger().info(f"Balance dict: {balance_dict}")
+            
+            for asset_name, balances in balance_dict.items():
+                free_balance = balances["AVAILABLE"]
+                frozen_balance = balances["FROZEN"]
+                total_balance = free_balance + frozen_balance
 
-        asset_names_to_remove = local_asset_names.difference(remote_asset_names)
-        for asset_name in asset_names_to_remove:
-            del self._account_available_balances[asset_name]
-            del self._account_balances[asset_name]
-        
+                self._account_available_balances[asset_name] = free_balance
+                self._account_balances[asset_name] = total_balance
+                remote_asset_names.add(asset_name)
+
+            asset_names_to_remove = local_asset_names.difference(remote_asset_names)
+            for asset_name in asset_names_to_remove:
+                del self._account_available_balances[asset_name]
+                del self._account_balances[asset_name]
+        except Exception as e:
+            self.logger().error(f"Error updating balances: {str(e)}", exc_info=True)
+            
     def _initialize_trading_pair_symbols_from_exchange_info(self, exchange_info: Dict[str, Any]):
         mapping = bidict()
         for symbol_data in filter(coinstore_utils.is_exchange_information_valid, exchange_info["data"]):
             mapping[symbol_data["symbolCode"]] = combine_to_hb_trading_pair(
-                base=symbol_data["tradeCurrencyCode"],
-                quote=symbol_data["quoteCurrencyCode"]
+                base=symbol_data["tradeCurrencyCode"].upper(),
+                quote=symbol_data["quoteCurrencyCode"].upper()
             )
         self._set_trading_pair_symbol_map(mapping)
 
@@ -378,3 +471,7 @@ class CoinstoreExchange(ExchangePyBase):
         )
 
         return float(resp_json["data"][0]["close"])
+    
+    async def stop_network(self):
+        await super().stop_network()
+        await self._http_client.close()

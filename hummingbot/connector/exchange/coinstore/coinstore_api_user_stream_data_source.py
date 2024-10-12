@@ -10,12 +10,16 @@ from hummingbot.core.web_assistant.connections.data_types import RESTMethod
 from hummingbot.core.web_assistant.web_assistants_factory import WebAssistantsFactory
 from hummingbot.core.web_assistant.ws_assistant import WSAssistant
 from hummingbot.logger import HummingbotLogger
+from hummingbot.core.web_assistant.connections.data_types import WSJSONRequest
 
 if TYPE_CHECKING:
     from hummingbot.connector.exchange.coinstore.coinstore_exchange import CoinstoreExchange
 
 
 class CoinstoreAPIUserStreamDataSource(UserStreamTrackerDataSource):
+    
+    LISTEN_KEY_KEEP_ALIVE_INTERVAL = 1800  
+    HEARTBEAT_TIME_INTERVAL = 30.0
 
     _logger: Optional[HummingbotLogger] = None
 
@@ -27,29 +31,14 @@ class CoinstoreAPIUserStreamDataSource(UserStreamTrackerDataSource):
                  domain: str = CONSTANTS.DEFAULT_DOMAIN):
         super().__init__()
         self._auth: CoinstoreAuth = auth
+        self._current_listen_key = None
+        self._domain = domain
         self._trading_pairs = trading_pairs
         self._connector = connector
-        self._domain = domain
         self._api_factory = api_factory
-        self._current_listen_key = None
         self._listen_for_user_stream_task = None
+        self._listen_key_initialized_event: asyncio.Event = asyncio.Event()
         self._last_listen_key_ping_ts = 0
-
-    @property
-    def last_recv_time(self) -> float:
-        return self._last_recv_time
-
-    async def listen_for_user_stream(self, output: asyncio.Queue):
-        while True:
-            try:
-                ws: WSAssistant = await self._connected_websocket_assistant()
-                await self._subscribe_channels(ws)
-                await self._process_websocket_messages(websocket_assistant=ws, queue=output)
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                self.logger().exception("Unexpected error while listening to user stream. Retrying after 5 seconds...")
-                await asyncio.sleep(5)
 
     async def _connected_websocket_assistant(self) -> WSAssistant:
         ws: WSAssistant = await self._api_factory.get_ws_assistant()
@@ -63,7 +52,8 @@ class CoinstoreAPIUserStreamDataSource(UserStreamTrackerDataSource):
                 "channel": ["outboundAccountPosition"],
                 "id": 1
             }
-            await websocket_assistant.send(payload)
+            subscribe_request = WSJSONRequest(payload=payload, is_auth_required=False)
+            await websocket_assistant.send(subscribe_request)
 
             self.logger().info("Subscribed to private account position and orders channels...")
         except asyncio.CancelledError:
@@ -72,35 +62,3 @@ class CoinstoreAPIUserStreamDataSource(UserStreamTrackerDataSource):
             self.logger().exception("Unexpected error occurred subscribing to account position and orders channels...")
             raise
 
-    async def _process_websocket_messages(self, websocket_assistant: WSAssistant, queue: asyncio.Queue):
-        async for ws_response in websocket_assistant.iter_messages():
-            data = ws_response.data
-            event_type = data.get("e")
-            if event_type == "outboundAccountPosition":
-                await self._process_account_position_event(event_data=data, queue=queue)
-            elif event_type == "executionReport":
-                await self._process_order_event(event_data=data, queue=queue)
-
-    async def _process_account_position_event(self, event_data: dict, queue: asyncio.Queue):
-        pass
-
-    async def _process_order_event(self, event_data: dict, queue: asyncio.Queue):
-        pass
-
-    async def _get_listen_key(self):
-        pass
-
-    async def _ping_listen_key(self) -> bool:
-        pass
-
-    async def _manage_listen_key_task_loop(self):
-        pass
-
-    def _is_user_stream_initialized(self):
-        pass
-
-    async def _get_ws_assistant(self) -> WSAssistant:
-        pass
-
-    async def _on_user_stream_interruption(self, websocket_assistant: Optional[WSAssistant]):
-        pass

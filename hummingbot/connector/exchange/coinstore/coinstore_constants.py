@@ -8,6 +8,7 @@ DEFAULT_DOMAIN = "com"
 
 REST_URL = "https://api.coinstore.com/api"
 WSS_URL = "wss://ws.coinstore.com/s/ws"
+WS_HEARTBEAT_TIME_INTERVAL = 30 
 API_VERSION = "v2"
 
 # REST API endpoints

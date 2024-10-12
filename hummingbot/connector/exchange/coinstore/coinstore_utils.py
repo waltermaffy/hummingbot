@@ -1,16 +1,13 @@
+import re
 from decimal import Decimal
-from typing import Any, Dict
+from typing import Any, Dict, Optional, Tuple
 
 from pydantic import Field, SecretStr
 
 from hummingbot.client.config.config_data_types import BaseConnectorConfigMap, ClientFieldData
-from hummingbot.core.data_type.trade_fee import TradeFeeSchema
-import re
-from typing import Optional, Tuple
-
 from hummingbot.client.config.config_methods import using_exchange
 from hummingbot.connector.exchange.coinstore.coinstore_constants import EXCHANGE_NAME
-
+from hummingbot.core.data_type.trade_fee import TradeFeeSchema
 
 CENTRALIZED = True
 EXAMPLE_PAIR = "ZRX-ETH"
@@ -76,4 +73,3 @@ class CoinstoreConfigMap(BaseConnectorConfigMap):
 
 
 KEYS = CoinstoreConfigMap.construct()
-

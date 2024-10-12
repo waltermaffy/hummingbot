@@ -899,9 +899,7 @@ class ExchangePyBase(ExchangeBase, ABC):
 
         last_exception = None
         rest_assistant = await self._web_assistants_factory.get_rest_assistant()
-
         url = overwrite_url or await self._api_request_url(path_url=path_url, is_auth_required=is_auth_required)
-
         for _ in range(2):
             try:
                 request_result = await rest_assistant.execute_request(
