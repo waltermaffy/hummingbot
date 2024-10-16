@@ -28,7 +28,10 @@ class CoinstoreAuth(AuthBase):
         return signature, expires
 
     async def rest_authenticate(self, request: RESTRequest) -> RESTRequest:
-        payload = json.dumps(request.data or {})
+        if request.method == RESTMethod.GET:
+            payload = urlencode(request.params or {})
+        else:
+            payload = json.dumps(request.data or {})
         signature, expires = self._get_signature(payload)
 
         headers = {

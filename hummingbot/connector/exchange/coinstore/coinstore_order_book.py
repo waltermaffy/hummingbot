@@ -16,13 +16,15 @@ class CoinstoreOrderBook(OrderBook):
                                        metadata: Optional[Dict] = None) -> OrderBookMessage:
         if metadata:
             msg.update(metadata)
+        
+        data = msg["data"]
         return OrderBookMessage(
             message_type=OrderBookMessageType.SNAPSHOT,
             content={
-                "trading_pair": msg["symbol"],
-                "update_id": msg.get("lastUpdateId", 0),
-                "bids": msg["b"],
-                "asks": msg["a"]
+                "trading_pair": msg["trading_pair"],
+                "update_id": timestamp,
+                "bids": data["b"],
+                "asks": data["a"]
             },
             timestamp=timestamp
         )

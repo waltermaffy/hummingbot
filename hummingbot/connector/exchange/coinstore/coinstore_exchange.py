@@ -19,7 +19,7 @@ from hummingbot.connector.exchange_py_base import ExchangePyBase
 from hummingbot.connector.trading_rule import TradingRule
 from hummingbot.connector.utils import TradeFillOrderDetails, combine_to_hb_trading_pair
 from hummingbot.core.data_type.common import OrderType, TradeType
-from hummingbot.core.data_type.in_flight_order import InFlightOrder, OrderUpdate, TradeUpdate
+from hummingbot.core.data_type.in_flight_order import InFlightOrder, OrderState, OrderUpdate, TradeUpdate
 from hummingbot.core.data_type.order_book_tracker_data_source import OrderBookTrackerDataSource
 from hummingbot.core.data_type.trade_fee import DeductedFromReturnsTradeFee, TokenAmount, TradeFeeBase
 from hummingbot.core.data_type.user_stream_tracker_data_source import UserStreamTrackerDataSource
@@ -33,6 +33,7 @@ import json
 
 if TYPE_CHECKING:
     from hummingbot.client.config.config_helpers import ClientConfigAdapter
+from urllib.parse import urlencode
 
 s_decimal_NaN = Decimal("nan")
 s_decimal_0 = Decimal(0)
@@ -54,6 +55,9 @@ class CoinstoreExchange(ExchangePyBase):
         self._domain = domain    
         self._trading_required = trading_required
         self._trading_pairs = trading_pairs
+        self._price_precision_map: Dict[str, int] = {}
+        self._amount_precision_map: Dict[str, int] = {}
+        
         self._http_client = aiohttp.ClientSession()
         super().__init__(client_config_map)
         
@@ -125,6 +129,22 @@ class CoinstoreExchange(ExchangePyBase):
             domain=self._domain
         )
 
+    async def _initialize_trading_pair_symbol_map(self):
+        try:
+            exchange_info = await self._make_trading_pairs_request()
+            self._initialize_trading_pair_symbols_from_exchange_info(exchange_info=exchange_info)
+            self._update_precision_maps(exchange_info)
+        except Exception:
+            self.logger().exception("There was an error requesting exchange info.")
+
+    def _update_precision_maps(self, exchange_info: Dict[str, Any]):
+        for symbol_data in filter(coinstore_utils.is_exchange_information_valid, exchange_info["data"]):
+            trading_pair = coinstore_utils.convert_from_exchange_to_trading_pair(symbol_data)
+            if trading_pair is not None:
+                self._price_precision_map[trading_pair] = int(symbol_data["tickSz"])
+                self._amount_precision_map[trading_pair] = int(symbol_data["lotSz"])
+
+
     def _get_fee(
         self,
         base_currency: str,
@@ -164,56 +184,93 @@ class CoinstoreExchange(ExchangePyBase):
         trading_rules = []
         for symbol_data in filter(coinstore_utils.is_exchange_information_valid, exchange_info["data"]):
             try:
-                trading_pair = await self.trading_pair_associated_to_exchange_symbol(symbol=symbol_data["symbolCode"])
+                trading_pair = coinstore_utils.convert_from_exchange_to_trading_pair(symbol_data)
+                if trading_pair is None:
+                    self.logger().error(f"Error parsing the trading pair rule {symbol_data}. Skipping.")
+                    continue
                 trading_rules.append(
                     TradingRule(
                         trading_pair=trading_pair,
-                        min_order_size=Decimal(symbol_data["minLmtSz"]),
-                        min_price_increment=Decimal(symbol_data["tickSz"]),
-                        min_base_amount_increment=Decimal(symbol_data["lotSz"]),
-                        min_notional_size=Decimal(symbol_data["minMktVa"]),
-                        max_order_size=Decimal(symbol_data.get("maxLmtSz", "inf")),
-                        min_order_value=Decimal(symbol_data.get("minMktVa", "0")),
-                        max_price_significant_digits=abs(Decimal(symbol_data["tickSz"]).as_tuple().exponent),
-                        supports_limit_orders=True,
-                        supports_market_orders=True,
+                        min_order_size=Decimal("1e-4"),
+                        min_price_increment=Decimal("1e-8"),
+                        min_base_amount_increment=Decimal("1e-8"),
+                        min_notional_size=Decimal("0"),
+                        supports_market_orders=False,
                     )
                 )
             except Exception:
                 self.logger().error(f"Error parsing the trading pair rule {symbol_data}. Skipping.", exc_info=True)
         return trading_rules
     
-    async def _place_order(self,
-                           order_id: str,
-                           trading_pair: str,
-                           amount: Decimal,
-                           trade_type: TradeType,
-                           order_type: OrderType,
-                           price: Decimal) -> Tuple[str, float]:
+    async def _place_order(
+        self,
+        order_id: str,
+        trading_pair: str,
+        amount: Decimal,
+        trade_type: TradeType,
+        order_type: OrderType,
+        price: Decimal,
+        **kwargs,
+    ) -> Tuple[str, float]:
         path_url = CONSTANTS.ORDER_PATH_URL
         side = "BUY" if trade_type is TradeType.BUY else "SELL"
-        order_type_str = "LIMIT" if order_type is OrderType.LIMIT else "MARKET"
+        order_type_str = CONSTANTS.ORDER_TYPE_MAP[order_type]
+        symbol = coinstore_utils.convert_to_exchange_trading_pair(trading_pair)
+        timestamp = int(self._time_synchronizer.time() * 1000)
+
+        # Handle precision for price and amount
+        price_precision = self.get_price_precision(trading_pair)
+        amount_precision = self.get_amount_precision(trading_pair)
+        price_str = f"{price:.{price_precision}f}"
+        amount_str = f"{amount:.{amount_precision}f}"
+
         data = {
-            "symbol": trading_pair,
+            "symbol": symbol,
             "side": side,
             "ordType": order_type_str,
-            "ordQty": str(amount),
-            "clOrdId": order_id,
+            "ordQty": amount_str,
+            "timestamp": timestamp,
         }
+
         if order_type is OrderType.LIMIT:
-            data["ordPrice"] = str(price)
+            data["ordPrice"] = price_str
+        elif order_type is OrderType.MARKET:
+            if trade_type is TradeType.BUY:
+                data["ordAmt"] = amount_str
+            # For SELL, we keep ordQty
+
+        if order_id:
+            data["clOrdId"] = order_id
+
+        # self.logger().info(f"Placing order: {data}")
+        
         exchange_order = await self._api_post(
             path_url=path_url,
             data=data,
             is_auth_required=True
         )
-        return str(exchange_order["data"]["ordId"]), self.current_timestamp
+        
+        # self.logger().info(f"Order placed: {exchange_order}")
+        
+        if "data" in exchange_order and "ordId" in exchange_order["data"]:
+            return str(exchange_order["data"]["ordId"]), self.current_timestamp
+        else:
+            raise ValueError(f"Unexpected response format: {exchange_order}")
+
+    # Helper methods for precision (implement these in your class)
+    def get_price_precision(self, trading_pair: str) -> int:
+        return self._price_precision_map.get(trading_pair, 8)  # Default to 8 if not found
+
+    def get_amount_precision(self, trading_pair: str) -> int:
+        return self._amount_precision_map.get(trading_pair, 8)  # Default to 8 if not found
+
 
     async def _place_cancel(self, order_id: str, tracked_order: InFlightOrder):
+        symbol = coinstore_utils.convert_to_exchange_trading_pair(tracked_order.trading_pair)
         cancel_result = await self._api_post(
             path_url=CONSTANTS.CANCEL_ORDER_PATH_URL,
             data={
-                "symbol": tracked_order.trading_pair,
+                "symbol": symbol,
                 "ordId": tracked_order.exchange_order_id,
             },
             is_auth_required=True
@@ -223,15 +280,98 @@ class CoinstoreExchange(ExchangePyBase):
     async def _user_stream_event_listener(self):
         async for event_message in self._iter_user_event_queue():
             try:
-                event_type = event_message.get("e")
-                if event_type == "outboundAccountPosition":
-                    await self._process_account_position(event_message)
-                elif event_type == "executionReport":
-                    await self._process_order_event(event_message)
+                await self._process_user_stream_event(event_message)
             except asyncio.CancelledError:
                 raise
             except Exception:
                 self.logger().exception("Unexpected error in user stream listener loop.")
+                await asyncio.sleep(5)
+
+    async def _process_user_stream_event(self, event: Dict[str, Any]):
+        if "open_orders" in event:
+            await self._process_open_orders_event(event["open_orders"])
+        if "completed_orders" in event:
+            await self._process_completed_orders_event(event["completed_orders"])
+        if "balance" in event:
+            self._process_balance_event(event["balance"])
+
+    async def _process_open_orders_event(self, open_orders: List[Dict[str, Any]]):
+        for order_data in open_orders:
+            exchange_order_id = str(order_data.get("ordId"))
+            client_order_id = order_data.get("clOrdId")
+            # self.logger().info(f"Processing open orders event for {client_order_id} with exchange order ID {exchange_order_id}")
+            if client_order_id is not None:
+                tracked_order = self._order_tracker.all_updatable_orders.get(client_order_id)
+                if tracked_order is not None:
+                    order_update = OrderUpdate(
+                        client_order_id=client_order_id,
+                        exchange_order_id=exchange_order_id,
+                        trading_pair=tracked_order.trading_pair,
+                        update_timestamp=self.current_timestamp,
+                        new_state=self._get_order_state(order_data),
+                    )
+                    self._order_tracker.process_order_update(order_update)
+
+    async def _process_completed_orders_event(self, completed_orders: List[Dict[str, Any]]):
+        for order_data in completed_orders:
+            exchange_order_id = str(order_data.get("ordId"))
+            client_order_id = order_data.get("clOrdId")
+
+            if client_order_id is not None:
+                tracked_order = self._order_tracker.all_updatable_orders.get(client_order_id)
+                if tracked_order is not None:
+                    order_update = OrderUpdate(
+                        client_order_id=client_order_id,
+                        exchange_order_id=exchange_order_id,
+                        trading_pair=tracked_order.trading_pair,
+                        update_timestamp=self.current_timestamp,
+                        new_state=self._get_order_state(order_data),
+                    )
+                    self._order_tracker.process_order_update(order_update)
+
+                    trade_update = TradeUpdate(
+                        trade_id=str(order_data.get("tradeId")),
+                        client_order_id=client_order_id,
+                        exchange_order_id=exchange_order_id,
+                        trading_pair=tracked_order.trading_pair,
+                        fee=self.get_fee(
+                            base_currency=tracked_order.base_asset,
+                            quote_currency=tracked_order.quote_asset,
+                            order_type=tracked_order.order_type,
+                            trade_type=tracked_order.trade_type,
+                            price=Decimal(order_data.get("ordPrice", "0")),
+                            amount=Decimal(order_data.get("ordQty", "0")),
+                        ),
+                        fill_price=Decimal(order_data.get("ordPrice", "0")),
+                        fill_base_amount=Decimal(order_data.get("ordQty", "0")),
+                        fill_quote_amount=Decimal(order_data.get("ordQty", "0")) * Decimal(order_data.get("ordPrice", "0")),
+                        fill_timestamp=int(order_data.get("timestamp", self.current_timestamp)),
+                    )
+                    self._order_tracker.process_trade_update(trade_update)
+
+    def _process_balance_event(self, balance_data: List[Dict[str, Any]]):
+        for balance_entry in balance_data:
+            asset_name = balance_entry["currency"]
+            self._account_balances[asset_name] = Decimal(balance_entry["balance"])
+            self._account_available_balances[asset_name] = Decimal(balance_entry["balance"]) - Decimal(balance_entry.get("locked_amount", "0"))
+
+    async def _update_trading_rules(self):
+        exchange_info = await self._make_trading_rules_request()
+        trading_rules_list = await self._format_trading_rules(exchange_info)
+        self._trading_rules.clear()
+        for trading_rule in trading_rules_list:
+            self._trading_rules[trading_rule.trading_pair] = trading_rule
+        self._initialize_trading_pair_symbols_from_exchange_info(exchange_info=exchange_info)
+        self._update_precision_maps(exchange_info)
+
+
+    async def _update_trading_fees(self):
+        """
+        Update fees information from the exchange
+        """
+        for trading_pair in self._trading_pairs:
+            self._trading_fees[trading_pair] = {"maker": CONSTANTS.DEFAULT_FEE, "taker": CONSTANTS.DEFAULT_FEE}
+
 
     async def _process_account_position(self, account_position: Dict[str, Any]):
         for balance_entry in account_position.get("B", []):
@@ -240,6 +380,20 @@ class CoinstoreExchange(ExchangePyBase):
             total_balance = Decimal(balance_entry["f"]) + Decimal(balance_entry["l"])
             self._account_balances[asset_name] = total_balance
             self._account_available_balances[asset_name] = free_balance
+
+    def _get_order_state(self, order_data: Dict[str, Any]) -> OrderState:
+        status = order_data.get("ordStatus", "").upper()
+        if status == "FILLED":
+            return OrderState.FILLED
+        elif status == "CANCELED":
+            return OrderState.CANCELED
+        elif status == "REJECTED":
+            return OrderState.FAILED
+        elif status == "PARTIAL_FILLED":
+            return OrderState.PARTIALLY_FILLED
+        else:
+            return OrderState.OPEN
+        
 
     async def _process_order_event(self, order_event: Dict[str, Any]):
         client_order_id = order_event.get("c")
@@ -259,16 +413,18 @@ class CoinstoreExchange(ExchangePyBase):
         trade_updates = []
         try:
             exchange_order_id = await order.get_exchange_order_id()
+            self.logger().info(f"Fetching all trade updates for order {order.client_order_id} with exchange order ID {exchange_order_id}")
             trading_pair = await self.exchange_symbol_associated_to_pair(trading_pair=order.trading_pair)
             all_fills_response = await self._api_get(
                 path_url=CONSTANTS.MY_TRADES_PATH_URL,
                 params={
                     "symbol": trading_pair,
                     "ordId": exchange_order_id,
+                    "timestamp": str(int(self._time_synchronizer.time() * 1000)),
                 },
                 is_auth_required=True
             )
-
+            self.logger().info(f"Coinstore Order update: {all_fills_response}")
             for trade in all_fills_response["data"]:
                 fee = TradeFeeBase.new_spot_fee(
                     fee_schema=self.trade_fee_schema(),
@@ -323,13 +479,11 @@ class CoinstoreExchange(ExchangePyBase):
 
         return order_update
 
-    async def _update_trading_fees(self):
-        """
-        Update fees information from the exchange
-        """
-        pass
-
     async def _make_trading_pairs_request(self) -> Any:
+        exchange_info = await self._api_post(path_url=self.trading_pairs_request_path, is_auth_required=True)
+        return exchange_info
+    
+    async def _make_trading_rules_request(self) -> Any:
         exchange_info = await self._api_post(path_url=self.trading_pairs_request_path, is_auth_required=True)
         return exchange_info
     
@@ -347,7 +501,7 @@ class CoinstoreExchange(ExchangePyBase):
             **kwargs,
     ) -> Dict[str, Any]:
         url = overwrite_url or await self._api_request_url(path_url=path_url, is_auth_required=is_auth_required)
-        self.logger().info(f"URL: {url} - headers: {headers} - params: {params} - data: {data} - method: {method} - is_auth_required: {is_auth_required} - return_err: {return_err} - limit_id: {limit_id}") 
+        # self.logger().info(f"URL: {url} - headers: {headers} - params: {params} - data: {data} - method: {method} - is_auth_required: {is_auth_required} - return_err: {return_err} - limit_id: {limit_id}") 
         
         try:
             headers = headers or {}
@@ -357,7 +511,6 @@ class CoinstoreExchange(ExchangePyBase):
 
             local_headers.update(headers)
 
-            # data = json.dumps(data) if data is not None else data
             payload = json.dumps(data or {})
 
             request = RESTRequest(
@@ -386,10 +539,10 @@ class CoinstoreExchange(ExchangePyBase):
                             raise Exception(f"Error response: {error_response}")
                         return await response.json()
                 elif method == RESTMethod.GET:
+                    request_url = request.url + "?" + urlencode(request.params or {})
                     async with session.get(
-                        url=request.url,
-                        headers=request.headers,
-                        data=payload
+                        url=request_url,
+                        headers=request.headers
                     ) as response:
                         # self.logger().info(f"Status: {response.status}")
                         if response.status != 200:
@@ -409,13 +562,11 @@ class CoinstoreExchange(ExchangePyBase):
     async def _update_balances(self):
         local_asset_names = set(self._account_balances.keys())
         remote_asset_names = set()
-        self.logger().info("Updating balances...")
         try:
             account_info = await self._api_post(
                 path_url=CONSTANTS.ACCOUNTS_PATH_URL,
                 is_auth_required=True
             )
-            # self.logger().info(f"Account info: {account_info}")
             
             if account_info.get("code") != 0:
                 self.logger().error(f"Error updating balances: {account_info.get('message')}")
@@ -432,9 +583,7 @@ class CoinstoreExchange(ExchangePyBase):
                     balance_dict[asset_name] = {"FROZEN": Decimal("0"), "AVAILABLE": Decimal("0")}
 
                 balance_dict[asset_name][balance_type] = balance
-            
-            # self.logger().info(f"Balance dict: {balance_dict}")
-            
+                        
             for asset_name, balances in balance_dict.items():
                 free_balance = balances["AVAILABLE"]
                 frozen_balance = balances["FROZEN"]
@@ -454,10 +603,10 @@ class CoinstoreExchange(ExchangePyBase):
     def _initialize_trading_pair_symbols_from_exchange_info(self, exchange_info: Dict[str, Any]):
         mapping = bidict()
         for symbol_data in filter(coinstore_utils.is_exchange_information_valid, exchange_info["data"]):
-            mapping[symbol_data["symbolCode"]] = combine_to_hb_trading_pair(
-                base=symbol_data["tradeCurrencyCode"].upper(),
-                quote=symbol_data["quoteCurrencyCode"].upper()
-            )
+            trading_pair = coinstore_utils.convert_from_exchange_to_trading_pair(symbol_data)
+            if trading_pair is None:
+                continue
+            mapping[symbol_data["symbolCode"]] = trading_pair
         self._set_trading_pair_symbol_map(mapping)
 
     async def _get_last_traded_price(self, trading_pair: str) -> float:

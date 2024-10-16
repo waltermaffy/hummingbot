@@ -10,13 +10,14 @@ from hummingbot.core.web_assistant.connections.data_types import RESTMethod, WSJ
 from hummingbot.core.web_assistant.web_assistants_factory import WebAssistantsFactory
 from hummingbot.core.web_assistant.ws_assistant import WSAssistant
 from hummingbot.logger import HummingbotLogger
-
+from hummingbot.connector.exchange.coinstore import coinstore_utils as utils
 if TYPE_CHECKING:
     from hummingbot.connector.exchange.coinstore.coinstore_exchange import CoinstoreExchange
 
 
 class CoinstoreAPIOrderBookDataSource(OrderBookTrackerDataSource):
     _logger: Optional[HummingbotLogger] = None
+    POLLING_INTERVAL = 5.0
 
     def __init__(
         self,
@@ -40,7 +41,7 @@ class CoinstoreAPIOrderBookDataSource(OrderBookTrackerDataSource):
         """
         Requests full order book snapshot for a specific trading pair.
         """
-        symbol = await self._connector.exchange_symbol_associated_to_pair(trading_pair=trading_pair)
+        symbol = utils.convert_to_exchange_trading_pair(trading_pair)
 
         params = {
             "symbol": symbol,
@@ -57,32 +58,15 @@ class CoinstoreAPIOrderBookDataSource(OrderBookTrackerDataSource):
 
         return data
 
-    async def _parse_trade_message(self, raw_message: Dict[str, Any], message_queue: asyncio.Queue):
-        trading_pair = raw_message["symbol"]
-        trade_message = CoinstoreOrderBook.trade_message_from_exchange(
-            raw_message,
-            {"trading_pair": trading_pair}
-        )
-        message_queue.put_nowait(trade_message)
 
-    async def _parse_order_book_diff_message(self, raw_message: Dict[str, Any], message_queue: asyncio.Queue):
-        trading_pair = raw_message["symbol"]
-        order_book_message: OrderBookMessage = CoinstoreOrderBook.diff_message_from_exchange(
-            raw_message,
-            time.time(),
-            {"trading_pair": trading_pair}
-        )
-        message_queue.put_nowait(order_book_message)
+    async def _request_trades(self, trading_pair: str) -> Dict[str, Any]:
+        return {}
 
-
-    async def _parse_order_book_snapshot_message(self, raw_message: Dict[str, Any], message_queue: asyncio.Queue):
-        """
-        Create an instance of OrderBookMessage of type OrderBookMessageType.SNAPSHOT
-
-        :param raw_message: the JSON dictionary of the public trade event
-        :param message_queue: queue where the parsed messages should be stored in
-        """
+    async def _subscribe_channels(self, websocket_assistant: WSAssistant):
         pass
+
+    async def _connected_websocket_assistant(self) -> Optional[WSAssistant]:
+        return None
 
     async def _order_book_snapshot(self, trading_pair: str) -> OrderBookMessage:
         snapshot_response: Dict[str, Any] = await self._request_order_book_snapshot(trading_pair)
@@ -94,42 +78,104 @@ class CoinstoreAPIOrderBookDataSource(OrderBookTrackerDataSource):
         )
         return snapshot_msg
     
-    async def _connected_websocket_assistant(self) -> WSAssistant:
-        ws: WSAssistant = await self._api_factory.get_ws_assistant()
-        await ws.connect(ws_url=CONSTANTS.WSS_URL, ping_timeout=CONSTANTS.WS_HEARTBEAT_TIME_INTERVAL)
-        return ws
-    
-    async def _subscribe_channels(self, ws: WSAssistant):
+    async def listen_for_subscriptions(self):
         """
-        Subscribes to the trade events and diff orders events through the provided websocket connection.
+        Polls the order book data and trade API since KoinBX doesn't support WebSockets
+        """
+        while True:
+            try:
+                for trading_pair in self._trading_pairs:
+                    await self._fetch_and_process_order_book(trading_pair)
+                    await self._fetch_and_process_trades(trading_pair)
+                self.logger().debug(f"Completed order book polling for {len(self._trading_pairs)} trading pairs")
+                await asyncio.sleep(self.POLLING_INTERVAL)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                self.logger().network(
+                    "Unexpected error occurred fetching order book snapshot and trade updates.",
+                    exc_info=True,
+                    app_warning_msg="Failed to fetch order book data. Check network connection.",
+                )
+                await asyncio.sleep(5.0)
+    
+    async def _fetch_and_process_order_book(self, trading_pair: str):
+        try:
+            snapshot: Dict[str, Any] = await self._request_order_book_snapshot(trading_pair)
+            snapshot_timestamp: float = time.time()
+            snapshot_msg: OrderBookMessage = CoinstoreOrderBook.snapshot_message_from_exchange(
+                snapshot,
+                snapshot_timestamp,
+                metadata={"trading_pair": trading_pair}
+            )
+            output = self._message_queue[self._snapshot_messages_queue_key]
+            await self._parse_order_book_snapshot_message(snapshot_msg, output)
+        except Exception:
+            self.logger().error(f"Failed to fetch and process order book for {trading_pair}", exc_info=True)
+
+    async def _fetch_and_process_trades(self, trading_pair: str):
+        try:
+            trades: Dict[str, Any] = await self._request_trades(trading_pair)
+            trade_messages = self._parse_trade_messages(trades, trading_pair)
+            for trade_message in trade_messages:
+                output = self._message_queue[self._trade_messages_queue_key]
+                await self._parse_trade_message(trade_message, output)
+            
+        except Exception:
+            self.logger().error(f"Failed to fetch and process trades for {trading_pair}", exc_info=True)
+
+
+    def _parse_trade_messages(self, trades: Dict[str, Any], trading_pair: str) -> List[Dict[str, Any]]:
+        # TODO: Update this
+        trade_messages = []
+        for trade in trades.get("data", []):
+            trade_message = {
+                "trade_id": trade.get("trade_id"),
+                "price": trade.get("price"),
+                "amount": trade.get("base_volume"),
+                "timestamp": trade.get("timestamp"),
+                "type": trade.get("type"),  # Handle missing 'type' appropriately
+                "trading_pair": trading_pair,
+            }
+            trade_messages.append(trade_message)
+        return trade_messages
+
+
+    async def _parse_order_book_diff_message(self, raw_message: Dict[str, Any], message_queue: asyncio.Queue):
+        trading_pair = raw_message["symbol"]
+        order_book_message: OrderBookMessage = CoinstoreOrderBook.diff_message_from_exchange(
+            raw_message,
+            time.time(),
+            {"trading_pair": trading_pair}
+        )
+        message_queue.put_nowait(order_book_message)
+
+    
+    # async def _connected_websocket_assistant(self) -> WSAssistant:
+    #     ws: WSAssistant = await self._api_factory.get_ws_assistant()
+    #     await ws.connect(ws_url=CONSTANTS.WSS_URL, ping_timeout=CONSTANTS.WS_HEARTBEAT_TIME_INTERVAL)
+    #     return ws
+    
+
+    async def _parse_order_book_snapshot_message(self, raw_message: OrderBookMessage, message_queue: asyncio.Queue):
+        message_queue.put_nowait(raw_message)
+    
+    async def _parse_trade_message(self, raw_message: Any, message_queue: asyncio.Queue):
+        """
+        Parses a trade message and adds it to the message queue.
+        
+        :param raw_message: The raw trade message, either a dict or OrderBookMessage
+        :param message_queue: The queue to which the parsed message will be added
         """
         try:
-            for trading_pair in self._trading_pairs:
-                symbol = await self._connector.exchange_symbol_associated_to_pair(trading_pair=trading_pair)
-                payload = {
-                    "op": "SUB",
-                    "channel": [f"{symbol}@trade", f"{symbol}@depth"],
-                    "id": 1
-                }
-                subscribe_request: WSJSONRequest = WSJSONRequest(payload=payload)
+            # Check if raw_message is an OrderBookMessage and extract its content
+            if isinstance(raw_message, OrderBookMessage):
+                msg = raw_message.content
+                return
+            else:
+                msg = raw_message
 
-                await ws.send(subscribe_request)
-
-            self.logger().info("Subscribed to public order book and trade channels...")
-        except asyncio.CancelledError:
-            raise
+            trade_message = CoinstoreOrderBook.trade_message_from_exchange(msg)
+            message_queue.put_nowait(trade_message)
         except Exception:
-            self.logger().error(
-                "Unexpected error occurred subscribing to order book trading and delta streams...",
-                exc_info=True
-            )
-            raise
-
-    def _channel_originating_message(self, event_message: Dict[str, Any]) -> str:
-        channel = ""
-        if "e" in event_message:
-            event_type = event_message["e"]
-            channel = (self._diff_messages_queue_key if event_type == CONSTANTS.DIFF_EVENT_TYPE
-                       else self._trade_messages_queue_key)
-        return channel
-
+            self.logger().error("Failed to parse trade message.", exc_info=True)

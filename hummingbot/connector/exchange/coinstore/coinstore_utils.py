@@ -29,11 +29,11 @@ def split_trading_pair(trading_pair: str) -> Optional[Tuple[str, str]]:
     except Exception:
         return None
     
-def convert_from_exchange_trading_pair(exchange_trading_pair: str) -> Optional[str]:
-    if split_trading_pair(exchange_trading_pair) is None:
+def convert_from_exchange_to_trading_pair(exchange_pair_data: Dict[str, Any]) -> Optional[str]:
+    if exchange_pair_data.get("tradeCurrencyCode") is None or exchange_pair_data.get("quoteCurrencyCode") is None:
         return None
-    base_asset, quote_asset = split_trading_pair(exchange_trading_pair)
-    return f"{base_asset}-{quote_asset}"
+    return f"{exchange_pair_data['tradeCurrencyCode'].upper()}-{exchange_pair_data['quoteCurrencyCode'].upper()}"
+
 
 def convert_to_exchange_trading_pair(hb_trading_pair: str) -> str:
     return hb_trading_pair.replace("-", "")
