@@ -229,15 +229,16 @@ class CoinstoreExchange(ExchangePyBase):
             "side": side,
             "ordType": order_type_str,
             "ordQty": amount_str,
+            "ordPrice": price_str,
             "timestamp": timestamp,
         }
 
-        if order_type is OrderType.LIMIT:
-            data["ordPrice"] = price_str
-        elif order_type is OrderType.MARKET:
-            if trade_type is TradeType.BUY:
-                data["ordAmt"] = amount_str
-            # For SELL, we keep ordQty
+        # if order_type is OrderType.LIMIT:
+        #     data["ordPrice"] = price_str
+        # elif order_type is OrderType.MARKET:
+        #     if trade_type is TradeType.BUY:
+        #         data["ordAmt"] = amount_str
+        # For SELL, we keep ordQty
 
         if order_id:
             data["clOrdId"] = order_id
@@ -413,18 +414,20 @@ class CoinstoreExchange(ExchangePyBase):
         trade_updates = []
         try:
             exchange_order_id = await order.get_exchange_order_id()
-            self.logger().info(f"Fetching all trade updates for order {order.client_order_id} with exchange order ID {exchange_order_id}")
-            trading_pair = await self.exchange_symbol_associated_to_pair(trading_pair=order.trading_pair)
+            symbol = coinstore_utils.convert_to_exchange_trading_pair(order.trading_pair)
             all_fills_response = await self._api_get(
                 path_url=CONSTANTS.MY_TRADES_PATH_URL,
                 params={
-                    "symbol": trading_pair,
+                    "symbol": symbol,
                     "ordId": exchange_order_id,
-                    "timestamp": str(int(self._time_synchronizer.time() * 1000)),
                 },
                 is_auth_required=True
             )
-            self.logger().info(f"Coinstore Order update: {all_fills_response}")
+            
+            if "data" not in all_fills_response:
+                self.logger().error(f"Error fetching trades for order {order.client_order_id}: {all_fills_response}")
+                return []
+
             for trade in all_fills_response["data"]:
                 fee = TradeFeeBase.new_spot_fee(
                     fee_schema=self.trade_fee_schema(),
@@ -441,7 +444,7 @@ class CoinstoreExchange(ExchangePyBase):
                     fill_base_amount=Decimal(trade["execQty"]),
                     fill_quote_amount=Decimal(trade["execAmt"]),
                     fill_price=Decimal(trade["execAmt"]) / Decimal(trade["execQty"]),
-                    fill_timestamp=trade["matchTime"],
+                    fill_timestamp=int(trade["matchTime"]),
                 )
                 trade_updates.append(trade_update)
         except asyncio.CancelledError:
@@ -455,18 +458,20 @@ class CoinstoreExchange(ExchangePyBase):
                                 f"Check API key and network connection."
             )
         return trade_updates
-
+    
     async def _request_order_status(self, tracked_order: InFlightOrder) -> OrderUpdate:
         exchange_order_id = await tracked_order.get_exchange_order_id()
         updated_order_data = await self._api_get(
             path_url=CONSTANTS.GET_ORDER_PATH_URL,
             params={
-                "symbol": tracked_order.trading_pair,
                 "ordId": exchange_order_id
             },
             is_auth_required=True
         )
-
+        if not "data" in updated_order_data:
+            self.logger().error(f"No data found in the response for order status update.")
+            return
+        
         new_state = CONSTANTS.ORDER_STATE[updated_order_data["data"]["ordStatus"]]
 
         order_update = OrderUpdate(

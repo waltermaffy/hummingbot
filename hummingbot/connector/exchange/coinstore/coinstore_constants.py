@@ -21,7 +21,7 @@ SNAPSHOT_PATH_URL = "/v1/market/depth/{symbol}"
 ACCOUNTS_PATH_URL = "/spot/accountList"
 ORDER_PATH_URL = "/trade/order/place"
 CANCEL_ORDER_PATH_URL = "/trade/order/cancel"
-GET_ORDER_PATH_URL = "/trade/order/orderInfo"
+GET_ORDER_PATH_URL = "/v2/trade/order/orderInfo"
 MY_TRADES_PATH_URL = "/trade/match/accountMatches"
 
 # New endpoints based on the documentation
