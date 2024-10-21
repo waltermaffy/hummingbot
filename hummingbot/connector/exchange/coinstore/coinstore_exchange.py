@@ -41,6 +41,7 @@ s_decimal_0 = Decimal(0)
 
 class CoinstoreExchange(ExchangePyBase):
     web_utils = web_utils
+
     
     def __init__(self,
                  client_config_map: "ClientConfigAdapter",
@@ -57,6 +58,10 @@ class CoinstoreExchange(ExchangePyBase):
         self._trading_pairs = trading_pairs
         self._price_precision_map: Dict[str, int] = {}
         self._amount_precision_map: Dict[str, int] = {}
+        self.ORDER_PAGE_LIMIT = 100
+        self.SHORT_POLL_INTERVAL = 2.0
+        self.LONG_POLL_INTERVAL = 10.0
+        self.TICK_INTERVAL_LIMIT = 5.0
         
         self._http_client = aiohttp.ClientSession()
         super().__init__(client_config_map)
@@ -286,15 +291,19 @@ class CoinstoreExchange(ExchangePyBase):
                 raise
             except Exception:
                 self.logger().exception("Unexpected error in user stream listener loop.")
-                await asyncio.sleep(5)
+                await asyncio.sleep(1)
 
     async def _process_user_stream_event(self, event: Dict[str, Any]):
-        if "open_orders" in event:
-            await self._process_open_orders_event(event["open_orders"])
-        if "completed_orders" in event:
-            await self._process_completed_orders_event(event["completed_orders"])
-        if "balance" in event:
-            self._process_balance_event(event["balance"])
+        try:
+            if "open_orders" in event:
+                await self._process_open_orders_event(event["open_orders"])
+            if "completed_orders" in event:
+                await self._process_completed_orders_event(event["completed_orders"])
+            if "balance" in event:
+                self._process_balance_event(event["balance"])
+        except Exception:
+            self.logger().error("Unexpected error in user stream event processing.", exc_info=True)
+
 
     async def _process_open_orders_event(self, open_orders: List[Dict[str, Any]]):
         for order_data in open_orders:
@@ -321,6 +330,7 @@ class CoinstoreExchange(ExchangePyBase):
             if client_order_id is not None:
                 tracked_order = self._order_tracker.all_updatable_orders.get(client_order_id)
                 if tracked_order is not None:
+                    # self.logger().info(f"Processing completed orders event for {client_order_id} with exchange order ID {exchange_order_id}")
                     order_update = OrderUpdate(
                         client_order_id=client_order_id,
                         exchange_order_id=exchange_order_id,
@@ -385,58 +395,47 @@ class CoinstoreExchange(ExchangePyBase):
     def _get_order_state(self, order_data: Dict[str, Any]) -> OrderState:
         status = order_data.get("ordStatus", "").upper()
         if status == "FILLED":
-            return OrderState.FILLED
+            return OrderState.COMPLETED # or FILLED?
         elif status == "CANCELED":
             return OrderState.CANCELED
         elif status == "REJECTED":
             return OrderState.FAILED
         elif status == "PARTIAL_FILLED":
             return OrderState.PARTIALLY_FILLED
+        elif status == "SUBMITTED":
+            return OrderState.OPEN
         else:
             return OrderState.OPEN
-        
-
-    async def _process_order_event(self, order_event: Dict[str, Any]):
-        client_order_id = order_event.get("c")
-        tracked_order = self._order_tracker.all_updatable_orders.get(client_order_id)
-        if tracked_order is not None:
-            order_update = OrderUpdate(
-                trading_pair=tracked_order.trading_pair,
-                update_timestamp=order_event["E"] * 1e-3,
-                new_state=CONSTANTS.ORDER_STATE[order_event["X"]],
-                client_order_id=client_order_id,
-                exchange_order_id=str(order_event["i"]),
-            )
-            self._order_tracker.process_order_update(order_update)
-
 
     async def _all_trade_updates_for_order(self, order: InFlightOrder) -> List[TradeUpdate]:
         trade_updates = []
+        # self.logger().info(f"Fetching trade updates for order {order.client_order_id}")
         try:
             exchange_order_id = await order.get_exchange_order_id()
             symbol = coinstore_utils.convert_to_exchange_trading_pair(order.trading_pair)
+            
             all_fills_response = await self._api_get(
                 path_url=CONSTANTS.MY_TRADES_PATH_URL,
                 params={
                     "symbol": symbol,
                     "ordId": exchange_order_id,
+                    "pageSize": self.ORDER_PAGE_LIMIT
                 },
                 is_auth_required=True
             )
             
             if "data" not in all_fills_response:
-                self.logger().error(f"Error fetching trades for order {order.client_order_id}: {all_fills_response}")
-                return []
-
+                self.logger().error(f"Error fetching trades for order {exchange_order_id}: {all_fills_response}")
+                
             for trade in all_fills_response["data"]:
                 fee = TradeFeeBase.new_spot_fee(
                     fee_schema=self.trade_fee_schema(),
                     trade_type=order.trade_type,
-                    percent_token=trade["feeCurrencyId"],
-                    flat_fees=[TokenAmount(amount=Decimal(trade["fee"]), token=trade["feeCurrencyId"])]
+                    percent_token="",
+                    flat_fees=[]
                 )
                 trade_update = TradeUpdate(
-                    trade_id=str(trade["tradeId"]),
+                    trade_id=str(trade["id"]),
                     client_order_id=order.client_order_id,
                     exchange_order_id=exchange_order_id,
                     trading_pair=order.trading_pair,
@@ -444,9 +443,11 @@ class CoinstoreExchange(ExchangePyBase):
                     fill_base_amount=Decimal(trade["execQty"]),
                     fill_quote_amount=Decimal(trade["execAmt"]),
                     fill_price=Decimal(trade["execAmt"]) / Decimal(trade["execQty"]),
-                    fill_timestamp=int(trade["matchTime"]),
+                    fill_timestamp=int(trade["matchTime"] * 1e-3),
                 )
                 trade_updates.append(trade_update)
+                        
+
         except asyncio.CancelledError:
             raise
         except Exception as e:
@@ -457,8 +458,9 @@ class CoinstoreExchange(ExchangePyBase):
                 app_warning_msg=f"Failed to fetch trade updates for order {order.client_order_id}. "
                                 f"Check API key and network connection."
             )
+        
         return trade_updates
-    
+
     async def _request_order_status(self, tracked_order: InFlightOrder) -> OrderUpdate:
         exchange_order_id = await tracked_order.get_exchange_order_id()
         updated_order_data = await self._api_get(
@@ -472,7 +474,7 @@ class CoinstoreExchange(ExchangePyBase):
             self.logger().error(f"No data found in the response for order status update.")
             return
         
-        new_state = CONSTANTS.ORDER_STATE[updated_order_data["data"]["ordStatus"]]
+        new_state = CONSTANTS.ORDER_STATE[updated_order_data["data"]["ordStatus"].upper()]
 
         order_update = OrderUpdate(
             client_order_id=tracked_order.client_order_id,

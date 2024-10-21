@@ -21,7 +21,7 @@ class CoinstoreAPIUserStreamDataSource(UserStreamTrackerDataSource):
     
     LISTEN_KEY_KEEP_ALIVE_INTERVAL = 1800  
     HEARTBEAT_TIME_INTERVAL = 30.0
-    POLL_INTERVAL = 5.0
+    POLL_INTERVAL = 1.0
     ORDER_PAGE_LIMIT = 100
 
     _logger: Optional[HummingbotLogger] = None
@@ -42,7 +42,7 @@ class CoinstoreAPIUserStreamDataSource(UserStreamTrackerDataSource):
         self._listen_for_user_stream_task = None
         self._listen_key_initialized_event: asyncio.Event = asyncio.Event()
         self._last_listen_key_ping_ts = 0
-        self._last_poll_timestamp = 0
+        self._last_poll_timestamp = int(time.time() * 1000)
 
         
     @property
@@ -107,28 +107,39 @@ class CoinstoreAPIUserStreamDataSource(UserStreamTrackerDataSource):
 
     async def _get_completed_orders(self) -> List[Dict[str, Any]]:
         """
-        Fetches completed orders from the exchange.
+        Fetches completed orders from the exchange, handling pagination.
         """
         completed_orders = []
         for trading_pair in self._trading_pairs:
-            data = {
-                "symbol": utils.convert_to_exchange_trading_pair(trading_pair),
-                "pageSize": self.ORDER_PAGE_LIMIT
-            }
-            # self.logger().info(f"Making request to {CONSTANTS.COMPLETED_ORDERS_PATH_URL} with data {data}")
-            response = await self._connector._api_request(
-                path_url=CONSTANTS.COMPLETED_ORDERS_PATH_URL,
-                method=RESTMethod.GET,
-                params=data,
-                is_auth_required=True,
-            )
-            # self.logger().info(f"Completed Response: {response}")
-            if not response or response.get("code") != 0:
-                self.logger().error(f"Failed to fetch completed orders for {trading_pair}. Retrying...")
-                continue
-            completed_orders.extend(response.get("data", {}) or [])
+            page_num = 1
+            while True:
+                data = {
+                    "symbol": utils.convert_to_exchange_trading_pair(trading_pair),
+                    "pageSize": self.ORDER_PAGE_LIMIT,
+                    "pageNum": page_num
+                }
+                response = await self._connector._api_request(
+                    path_url=CONSTANTS.COMPLETED_ORDERS_PATH_URL,
+                    method=RESTMethod.GET,
+                    params=data,
+                    is_auth_required=True,
+                )
+                # self.logger().info(f"Completed Response for page {page_num}: {response}")
+                
+                if not response or response.get("code") != 0:
+                    self.logger().error(f"Failed to fetch completed orders for {trading_pair} on page {page_num}. Skipping to next trading pair.")
+                    break
+                
+                page_data = response.get("data", []) or []
+                completed_orders.extend(page_data)
+                
+                if len(page_data) < self.ORDER_PAGE_LIMIT:
+                    break  # No more pages to fetch
+                
+                page_num += 1
+        
         return completed_orders
-
+        
     async def _get_balance(self) -> List[Dict[str, Any]]:
         """
         Fetches account balance from the exchange.
